@@ -111,12 +111,15 @@ class SizingTests(unittest.TestCase):
         self.assertAlmostEqual(sizing.headroom_bytes(16.3e9), 1.63e9)
         self.assertAlmostEqual(sizing.headroom_bytes(8.5e9, display=False), 0.85e9)
 
-    def test_readme_tables_are_generated(self):
-        readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
-        for name, body in (("presets", sizing.presets_table()), ("measured", sizing.measured_table())):
-            self.assertIn(f"<!-- {name}:begin -->\n{body}\n<!-- {name}:end -->", readme,
-                          f"README {name} table is stale: "
-                          f"python3 engines/exl3_offload/sizing.py presets --write README.md")
+    def test_doc_tables_are_generated(self):
+        root = Path(__file__).resolve().parents[1]
+        for doc, name, body in (("README.md", "presets", sizing.presets_table()),
+                                ("README.md", "measured-summary", sizing.measured_summary()),
+                                ("docs/measured.md", "measured", sizing.measured_table("../"))):
+            self.assertIn(f"<!-- {name}:begin -->\n{body}\n<!-- {name}:end -->",
+                          (root / doc).read_text(encoding="utf-8"),
+                          f"{doc}'s {name} table is stale: "
+                          f"python3 engines/exl3_offload/sizing.py presets --write {doc}")
 
     def test_budgeted_runs_pin_the_cache(self):
         p = sizing.plan("3.05", 16 * GB, 262144)

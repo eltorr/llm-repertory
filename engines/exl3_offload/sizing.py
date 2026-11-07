@@ -387,10 +387,10 @@ def measured_on(m):
 def _tested(found, ram):
     """A preset's test status for the matrix: the measured speed and where, or not tested."""
     if not found:
-        return "⚪ not tested"
+        return "not tested yet"
     m = found[0]
-    return (f"✅ *{m['decode']} tok/s* · {measured_on(m)}"
-            + ("" if m["ram"] == ram else f", {m['ram']} GB RAM"))
+    return (f"measured {m['decode']} tok/s ({measured_on(m)}"
+            + ("" if m["ram"] == ram else f", {m['ram']} GB RAM") + ")")
 
 
 def presets_table(platform="linux"):
@@ -412,7 +412,7 @@ def presets_table(platform="linux"):
     return "\n".join(lines)
 
 
-def measured_table():
+def measured_table(link_prefix=""):
     """The README's measurement chart (between <!-- measured:begin/end -->), from MEASURED."""
     lines = ["| Card (VRAM) | Quant | Context | RAM cache | Prefill | Decode | Measured on |",
              "|---" * 7 + "|"]
@@ -421,8 +421,24 @@ def measured_table():
         ctx = _ctx(m["context"]) + ("" if m.get("staging", True) else ", no staging")
         lines.append(f"| **{_card_name(m['card'], m.get('display', True))}** | {m['quant']} | {ctx} | "
                      f"{m['ram_cache_gib']} GiB | {m['prefill']:,} tok/s | {m['decode']} tok/s | "
-                     f"[{measured_on(m)}]({m['source']}/REPORT.md), {m['ram']} GB RAM, "
+                     f"[{measured_on(m)}]({link_prefix}{m['source']}/REPORT.md), {m['ram']} GB RAM, "
                      f"{PLATFORMS[m['platform']]} |")
+    return "\n".join(lines)
+
+
+def measured_summary():
+    """The README's short version (between <!-- measured-summary:begin/end -->): the fastest measured setup for each
+    card size and quant. The full chart is docs/measured.md."""
+    best = {}
+    for m in MEASURED:
+        key = (m["card"], m.get("display", True), m["quant"])
+        if key not in best or m["decode"] > best[key]["decode"]:
+            best[key] = m
+    lines = ["| Card (VRAM) | Quant | Context | Decode | Prefill |", "|---" * 5 + "|"]
+    for (card, display, _), m in sorted(best.items(), key=lambda kv: (-kv[0][0], kv[0][1], kv[0][2])):
+        ctx = _ctx(m["context"]) + ("" if m.get("staging", True) else ", no staging")
+        lines.append(f"| {_card_name(card, display)} | {m['quant']} bpw | {ctx} | {m['decode']} tok/s | "
+                     f"{m['prefill']:,} tok/s |")
     return "\n".join(lines)
 
 
@@ -431,14 +447,21 @@ def presets_markdown(platform="linux"):
 
 
 def update_readme(path):
-    """Rewrite the generated tables in the README (python3 engines/exl3_offload/sizing.py presets --write README.md)."""
+    """Rewrite the generated tables in a doc (sizing.py presets --write README.md, --write docs/measured.md): every
+    block whose <!-- NAME:begin/end --> markers the file has."""
     import re
-    text = open(path, encoding="utf-8").read()
-    for name, body in (("presets", presets_table()), ("measured", measured_table())):
+    text, found = open(path, encoding="utf-8").read(), 0
+    import os
+    up = os.path.relpath(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                         os.path.dirname(os.path.abspath(path))).replace(os.sep, "/")
+    prefix = "" if up == "." else up + "/"          # links to research/ from where the doc is
+    for name, body in (("presets", presets_table()), ("measured", measured_table(prefix)),
+                       ("measured-summary", measured_summary())):
         text, n = re.subn(rf"(<!-- {name}:begin -->\n).*?(\n<!-- {name}:end -->)",
                           lambda m: m.group(1) + body + m.group(2), text, flags=re.S)  # noqa: B023 (used at once)
-        if n != 1:
-            raise SystemExit(f"{path}: no <!-- {name}:begin/end --> markers")
+        found += n
+    if not found:
+        raise SystemExit(f"{path}: no generated-table markers")
     open(path, "w", encoding="utf-8", newline="\n").write(text)
 
 

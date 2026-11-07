@@ -34,6 +34,10 @@ class PromptSpeedTests(unittest.TestCase):
                       "prompt_tokens_details": {"cached_tokens": 8_900}})
         self.assertIsNone(m["prefill_tps"])                     # 100 new tokens: too few to time
 
+    def test_an_answer_that_arrives_all_at_once_has_no_decode_speed(self):
+        m = recorded({"prompt_tokens": 300, "completion_tokens": 28}, decode_s=0.0002)   # a tool call, whole
+        self.assertIsNone(m["decode_tps"])
+
     def test_a_cached_figure_out_of_range_is_ignored(self):
         m = recorded({"prompt_tokens": 4_000, "completion_tokens": 20, "prompt_tokens_details": {"cached_tokens": -5}})
         self.assertEqual((m["cached"], m["prefill_tps"]), (0, 2_000))

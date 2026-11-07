@@ -860,7 +860,8 @@ class Service:
         self.metrics.append({
             "t": t_end, "prompt": pt, "cached": cached, "completion": ct, "wait_s": round(t_send - t0, 2),
             "ttft_s": round(ttft, 3) if ttft is not None else None, "total_s": round(t_end - t_send, 2),
-            "decode_tps": round(ct / decode_s, 1) if decode_s and ct > 8 else None,
+            # an answer that arrives in one piece at the end (a tool call) has no decode time to measure
+            "decode_tps": round(ct / decode_s, 1) if decode_s and decode_s >= 0.25 and ct > 8 else None,
             "prefill_tps": round(new / ttft) if ttft and new > 256 else None,
             "tier": self.be.tier, "budget_gb": round((self.be.budget or 0) / GB, 1), "cold": was_held})
 

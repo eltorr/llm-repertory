@@ -2,6 +2,21 @@
 
 What changed in Repertory, newest first.
 
+## 2026-11-07: docs and dashboard
+
+- The README is reorganized: quick start, how to use it (clients, games, other devices, benchmarks, updating), the
+  parts it's built from, dashboard screenshots, presets and a short table of measured speeds. Every measured
+  configuration moved to [docs/measured.md](docs/measured.md). The preset table says "measured" or "not tested yet"
+  in words.
+- The dashboard's prompt speed counts only the prompt tokens the model processed, not the ones the prompt cache
+  served (a follow-up in a long conversation showed 15,000 tok/s), and an answer that arrives in one piece, such as
+  a tool call, no longer shows an impossible generation speed.
+- The Benchmark tab keeps QwenFlash's earlier runs: the settings import copies them.
+- A link can open a dashboard tab directly: `/#setup`, `/#bench`, `/#settings`, `/#logs`.
+- `tools/screenshots.py` takes the docs' screenshots from the running dashboard without changing anything: it
+  aborts every request that isn't a read, scrubs private values from what the page shows, and refuses to save an
+  image with any left.
+
 ## 2026-11-07: Repertory
 
 The project's first release under its own name, as a repository of its own: a platform for running curated local

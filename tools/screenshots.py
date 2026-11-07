@@ -51,9 +51,10 @@ def make_scrub(cfg):
     token, port = cfg.get("dashboard_token") or "", cfg.get("network_port") or 0
     names, home, user = private_values(cfg), str(Path.home()), Path.home().name
     example_token = secrets.token_urlsafe(24)
-    # LAN, tailnet (CGNAT) and unique-local addresses; not every dotted number (version numbers look the same)
-    ipv4 = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2\d|3[01])|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7]))"
-                      r"(?:\.\d{1,3}){1,3}\b")
+    # whole LAN, tailnet (CGNAT) and unique-local addresses, not any dotted number: versions and Windows builds
+    # (10.0.26200) look alike
+    ipv4 = re.compile(r"(?<![\d.])(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])"
+                      r"(?:\.\d{1,3}){2}|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])(?:\.\d{1,3}){2})(?![\d.])")
     ipv6 = re.compile(r"\b(?:f[cd][0-9a-f]{2}|fe80):[0-9a-f:]+\b", re.I)
 
     def text(s):
@@ -118,7 +119,7 @@ def main():
         if found:
             print(f"NOT SAVED {name}: private values on screen: {found}")
             return
-        shots[name] = locator.screenshot() if locator is not None else page.screenshot(clip=clip)
+        shots[name] = locator.screenshot() if locator is not None else page.screenshot(clip=clip, full_page=True)
 
     def card(page, inner):
         return page.locator("section.card", has=page.locator(inner))
@@ -146,16 +147,17 @@ def main():
             pg.wait_for_selector("#recs :first-child", timeout=30000)
             pg.wait_for_timeout(1500)
             top, recs = pg.locator("#facts").bounding_box(), pg.locator("#recs").bounding_box()
-            keep("dashboard-setup", pg, clip={"x": top["x"] - 8, "y": top["y"] - 8, "width": top["width"] + 16,
+            scroll = pg.evaluate("window.scrollY")        # boxes are relative to the window, a full-page clip isn't
+            keep("dashboard-setup", pg, clip={"x": top["x"] - 8, "y": top["y"] + scroll - 8,
+                                              "width": top["width"] + 16,
                                               "height": recs["y"] + recs["height"] - top["y"] + 16})
             pg.click('.tabs button[data-tab="bench"]')
             pg.wait_for_timeout(2000)
             run = a.bench or pg.eval_on_selector("#benchHistory", "s => s.options.length ? s.options[0].value : ''")
             if run:
                 pg.select_option("#benchHistory", run)
-                pg.wait_for_function("document.getElementById('benchOut') === null || "
-                                     "!document.getElementById('benchOut').innerText.includes('appears here')",
-                                     timeout=15000)
+                pg.wait_for_function("document.getElementById('benchTable').innerText.trim().length > 0",
+                                     timeout=15000)       # a past run's results fill the table
                 pg.wait_for_timeout(1500)
             keep("dashboard-bench", pg, pg.locator("#p-bench"))
             ctx.close()
