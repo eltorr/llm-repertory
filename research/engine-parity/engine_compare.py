@@ -9,10 +9,8 @@ import sys
 import time
 import urllib.request
 
-BASE, OUT = sys.argv[1].rstrip("/"), sys.argv[2]
+BASE, OUT = "", ""
 HEADERS = {"Content-Type": "application/json"}
-if "--key" in sys.argv:
-    HEADERS["Authorization"] = "Bearer " + os.environ[sys.argv[sys.argv.index("--key") + 1]]
 
 WEATHER = [{"type": "function", "function": {
     "name": "get_weather", "description": "Current weather for a city",
@@ -73,7 +71,11 @@ def run(name, body):
     return out
 
 
-results = [run(n, b) for n, b in CASES]
-with open(OUT, "w", encoding="utf-8") as f:
-    json.dump({"base": BASE, "when": time.strftime("%Y-%m-%d %H:%M:%S"), "results": results}, f, indent=1)
-print("saved", OUT)
+if __name__ == "__main__":
+    BASE, OUT = sys.argv[1].rstrip("/"), sys.argv[2]
+    if "--key" in sys.argv:
+        HEADERS["Authorization"] = "Bearer " + os.environ[sys.argv[sys.argv.index("--key") + 1]]
+    results = [run(n, b) for n, b in CASES]
+    with open(OUT, "w", encoding="utf-8") as f:
+        json.dump({"base": BASE, "when": time.strftime("%Y-%m-%d %H:%M:%S"), "results": results}, f, indent=1)
+    print("saved", OUT)

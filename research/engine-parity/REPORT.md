@@ -8,7 +8,7 @@ fork's (see the commit history). This run checks that it gives the same answers 
 served, on the same model files and expert store.
 
 **Method.** [engine_compare.py](engine_compare.py) sends five greedy chat requests (temperature 0, streamed, each
-answer to its natural end) to a server: a short answer, code, a tool call, a 30K-token document with one fact to find,
+answer to its natural end) to a server: a short answer, code, a tool call, a 73K-token document with one fact to find,
 and a short answer with thinking on. First the earlier engine (as it was serving, warm from earlier use), then
 Repertory's on its own port with the earlier one paused. [compare_report.py](compare_report.py) compares text,
 reasoning, tool calls, finish reasons and token counts.
@@ -18,7 +18,7 @@ reasoning, tool calls, finish reasons and token counts.
 | short | identical | 92 | 1.69 / 0.81 s | 30.5 / 48.3 tok/s |
 | code | identical | 262 | 0.66 / 0.30 s | 32.6 / 46.5 tok/s |
 | tool call | identical (same call and arguments) | 28 | 3.01 / 2.21 s | - |
-| 30K-token document | identical | 23 | 12.39 / 12.58 s | 28.4 / 36.3 tok/s |
+| 73K-token document | identical | 23 | 12.39 / 12.58 s | 28.4 / 36.3 tok/s |
 | thinking on | identical | 58 | 0.76 / 0.46 s | 37.0 / 39.4 tok/s |
 
 **All five answers are identical.** Repertory's engine started in 67 s, and its startup check found no bad VRAM or
@@ -44,4 +44,10 @@ cap, which leaves out the CUDA context and other allocators, and ended 2.5 GB pa
 limit (0.6 GB free on the card instead of the 3.2 GB the manager keeps for the desktop and games). It sizes to that
 limit again (`GLM53_VRAM_LIMIT_BYTES`), and uses 27.0 GB, as the earlier engine did.
 
-Raw results: [results/](results/) (`repertory-manager.json` is the run through the manager).
+**After the chat routes became one pipeline** (Responses first, Chat Completions on the same turn): the five requests
+again through Chat Completions, identical; and through the Responses API with [responses_compare.py](responses_compare.py),
+each both whole and streamed, all ten identical to the earlier engine's Chat Completions answers. Responses usage now
+reports the prompt tokens the prefix cache served (the document's second read: 73,216 of 73,241).
+
+Raw results: [results/](results/) (`repertory-manager.json` is the run through the manager, `repertory-merged.json`
+the run after the merge).

@@ -8,7 +8,7 @@ Repertory's benchmark has prompts and documents of its own, so new runs don't co
 
 | Date | Machine | Stack | What it measured | Record |
 |---|---|---|---|---|
-| 2026-11-07 | RTX 5090, 64 GB RAM, WSL2 | PyTorch 2.15, CUDA 13.2 | Repertory's engine against the earlier fork's: five greedy requests (short, code, tool call, 30K-token document, thinking) give identical answers | [engine-parity](engine-parity/REPORT.md) |
+| 2026-11-07 | RTX 5090, 64 GB RAM, WSL2 | PyTorch 2.15, CUDA 13.2 | Repertory's engine against the earlier fork's: five greedy requests (short, code, tool call, 73K-token document, thinking) give identical answers | [engine-parity](engine-parity/REPORT.md) |
 | 2026-11-07 | RTX 5090, 64 GB RAM, WSL2 | PyTorch 2.15, CUDA 13.2 | Switching full <-> lean without a restart: 0.2-0.5 s, 13.3 GB freed, same answers. The RAM cache too: under a second to shrink it, grown back in the background without holding requests (stress-tested) | [live-resize](live-resize/REPORT.md) |
 | 2026-11-05 | RTX 5090, capped to 7-32 GB and uncapped, 64 GB RAM, WSL2 | PyTorch 2.15, CUDA 13.2 | VRAM scaling: the README's tables. Follow-up 2026-11-06: short prompts skip staging (documents read 1.2-5 times faster) | [vram-scaling-torch-2.15](vram-scaling-torch-2.15/REPORT.md) |
 | 2026-11-05 | RTX 5090, 64 GB RAM, WSL2 | 2.11 / 12.8 vs 2.15 / 13.2 | The stack upgrade: prefill 47-72% faster, decode the same | [torch-2.15](torch-2.15/REPORT.md) |
