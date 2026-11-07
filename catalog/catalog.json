@@ -1,0 +1,331 @@
+{
+  "$schema": "./schema.json",
+  "schema_version": 1,
+  "engines": [
+    {
+      "id": "exl3-offload",
+      "name": "ExLlamaV3 with glm53-flash-offload's VRAM, RAM and NVMe expert tiers (adapter: engines/exl3_offload)",
+      "license": {
+        "spdx": "MIT",
+        "note": "Repertory's adapter (engines/exl3_offload/) is MIT (eltorr); glm53-flash-offload/ is MIT (0xSero, sybil-solutions) and exllamav3/ is MIT (turboderp), each under its own license file."
+      },
+      "source": {
+        "self": true,
+        "subdir": "engines/exl3_offload"
+      },
+      "requires": {
+        "platforms": [
+          "linux-x86_64",
+          "windows-wsl2"
+        ],
+        "gpu": {
+          "vendor": "nvidia",
+          "min_compute_capability": "7.5",
+          "min_driver": "595",
+          "min_vram_gb": 8
+        },
+        "cuda_toolkit": "13.2",
+        "python": ">=3.11,<3.13",
+        "torch": "2.15.0+cu132",
+        "lock": {
+          "path": "setup/requirements.txt",
+          "sha256": "14d4425a2c49145a6290805300565f8f3b2f2a1e09b587ed80e7005789619c39"
+        }
+      },
+      "build": [
+        {
+          "id": "base",
+          "title": "Build tools and the CUDA toolkit",
+          "run": [
+            "bash",
+            "setup/10_base.sh"
+          ],
+          "needs_root": true
+        },
+        {
+          "id": "env",
+          "title": "Python environment (hash-pinned)",
+          "run": [
+            "bash",
+            "setup/20_env.sh"
+          ],
+          "creates": ".venv/bin/python"
+        },
+        {
+          "id": "kernels",
+          "title": "exllamav3 and the offload kernels for this GPU",
+          "run": [
+            "bash",
+            "setup/30_build.sh"
+          ]
+        }
+      ],
+      "serve": {
+        "command": [
+          ".venv/bin/python",
+          "engines/exl3_offload/server.py",
+          "--model",
+          "{model_dir}",
+          "--store",
+          "{store}",
+          "--ram-gb",
+          "{ram_gib}",
+          "--cache",
+          "{context}",
+          "--chunk",
+          "{chunk}",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "{port}"
+        ],
+        "env": {
+          "QWEN_VRAM_LIMIT_BYTES": "{vram_limit_bytes}",
+          "QWEN_VRAM_GUARD_BYTES": "{vram_guard_bytes}",
+          "REPERTORY_BACKEND_KEY": "{backend_key}"
+        },
+        "placeholders": [
+          "model_dir",
+          "store",
+          "ram_gib",
+          "context",
+          "chunk",
+          "port",
+          "vram_limit_bytes",
+          "vram_guard_bytes",
+          "backend_key"
+        ],
+        "health": "/health",
+        "ready_line": "ENGINE READY",
+        "apis": [
+          "openai-chat",
+          "openai-responses",
+          "openai-completions"
+        ]
+      },
+      "placement": {
+        "tiers": [
+          "vram",
+          "ram",
+          "cpu-compute",
+          "nvme"
+        ],
+        "knobs": {
+          "vram_limit": {
+            "env": "QWEN_VRAM_LIMIT_BYTES",
+            "unit": "bytes",
+            "live": false,
+            "note": "device-wide; sizes the VRAM expert cache"
+          },
+          "ram_cache": {
+            "arg": "--ram-gb",
+            "unit": "GiB",
+            "live": false
+          },
+          "cache_slots_max": {
+            "env": "GLM53_EC_MAX_SLOTS",
+            "unit": "count",
+            "live": false
+          },
+          "stage_min_picks": {
+            "env": "GLM53_EC_STAGE_MIN",
+            "unit": "count",
+            "live": false,
+            "default": 16384
+          },
+          "cpu_lane": {
+            "arg": "--cpu-lane",
+            "unit": "bool",
+            "live": false,
+            "default": false,
+            "note": "or QWEN_CPU_LANE=1. Computes RAM-resident decode picks on the CPU; refuses experts that aren't 3-bit and stops the start if its self-test fails. The engine can switch it between requests (nv2 enable_cpu/set_cpu), but the server has no route to that yet"
+          },
+          "cpu_lane_cpus": {
+            "env": "GLM53_NV_CPU_CPUS",
+            "unit": "cpu-list",
+            "live": false,
+            "default": "2-7"
+          },
+          "mtp_draft_tokens": {
+            "arg": "--mtp",
+            "unit": "count",
+            "live": false,
+            "default": 0,
+            "note": "or QWEN_MTP. Tokens the MTP layer drafts per step; the stores include its experts"
+          },
+          "prefetch": {
+            "arg": "--prefetch",
+            "unit": "bool",
+            "live": false,
+            "default": false,
+            "note": "or GLM53_NV_PREFETCH=1. Next-layer router hints start NVMe reads early"
+          }
+        }
+      }
+    }
+  ],
+  "models": [
+    {
+      "id": "qwen3.8-flash-next-exl3-3.05",
+      "family": "qwen3.8-flash-next",
+      "label": "3.05 bpw (fastest)",
+      "source": {
+        "huggingface": "turboderp/Qwen3.8-Flash-Next-exl3",
+        "branch": "3.05bpw_h5_ng5",
+        "revision": "69e33439ae950f17bcbe95c98f117d80f759ab6d",
+        "verify": "hub-hashes"
+      },
+      "format": "exl3",
+      "bpw": 3.05,
+      "engines": [
+        "exl3-offload"
+      ],
+      "facts": {
+        "experts_per_layer": 512,
+        "moe_layers": 48,
+        "experts_per_token": 10,
+        "expert_bytes": 1843200,
+        "store_record_bytes": 1863680,
+        "fixed_vram_bytes": 6150000000,
+        "kv_bytes_per_token": {
+          "2": 7680,
+          "4": 10752,
+          "8": 16896,
+          "16": 28416
+        },
+        "max_context": 262144,
+        "mtp": true
+      },
+      "disk": {
+        "download_gb": 85,
+        "prepared_gb": 47
+      },
+      "paths": {
+        "model_dir": "model",
+        "store": "store/qwen.bin"
+      },
+      "prepare": [
+        {
+          "id": "download",
+          "title": "Download and check every file",
+          "run": [
+            ".venv/bin/python",
+            "engines/exl3_offload/download.py",
+            "--model-dir",
+            "./model",
+            "--branch",
+            "3.05bpw_h5_ng5"
+          ]
+        },
+        {
+          "id": "pack",
+          "title": "Pack the expert store (with the MTP layer)",
+          "run": [
+            ".venv/bin/python",
+            "glm53-flash-offload/scripts/pack_glm53_store.py",
+            "pack",
+            "--model",
+            "./model",
+            "--out-dir",
+            "./store",
+            "--name",
+            "qwen"
+          ],
+          "creates": "store/qwen.bin"
+        }
+      ],
+      "measured": [
+        {
+          "date": "2026-11-05",
+          "machine": "RTX 5090, Ryzen 9 9950X, 64 GB, Windows 11 + WSL2",
+          "engine": "exl3-offload",
+          "decode_tps": 72.1,
+          "prefill_tps": 4668,
+          "report": "research/vram-scaling-torch-2.15/REPORT.md"
+        }
+      ],
+      "cpu_execution": "experimental"
+    },
+    {
+      "id": "qwen3.8-flash-next-exl3-4.05",
+      "family": "qwen3.8-flash-next",
+      "label": "4.05 bpw (higher fidelity)",
+      "source": {
+        "huggingface": "turboderp/Qwen3.8-Flash-Next-exl3",
+        "branch": "4.05bpw_h6_ng6",
+        "revision": "55a732e0c4c3d4614bc42b68493bb930d9b02c0a",
+        "verify": "hub-hashes"
+      },
+      "format": "exl3",
+      "bpw": 4.05,
+      "engines": [
+        "exl3-offload"
+      ],
+      "facts": {
+        "experts_per_layer": 512,
+        "moe_layers": 48,
+        "experts_per_token": 10,
+        "expert_bytes": 2457600,
+        "store_record_bytes": 2478080,
+        "fixed_vram_bytes": 6620000000,
+        "kv_bytes_per_token": {
+          "2": 7680,
+          "4": 10752,
+          "8": 16896,
+          "16": 28416
+        },
+        "max_context": 262144,
+        "mtp": true
+      },
+      "disk": {
+        "download_gb": 107,
+        "prepared_gb": 62
+      },
+      "paths": {
+        "model_dir": "model-4.05",
+        "store": "store/qwen405.bin"
+      },
+      "prepare": [
+        {
+          "id": "download",
+          "title": "Download and check every file",
+          "run": [
+            ".venv/bin/python",
+            "engines/exl3_offload/download.py",
+            "--model-dir",
+            "./model-4.05",
+            "--branch",
+            "4.05bpw_h6_ng6"
+          ]
+        },
+        {
+          "id": "pack",
+          "title": "Pack the expert store (with the MTP layer)",
+          "run": [
+            ".venv/bin/python",
+            "glm53-flash-offload/scripts/pack_glm53_store.py",
+            "pack",
+            "--model",
+            "./model-4.05",
+            "--out-dir",
+            "./store",
+            "--name",
+            "qwen405"
+          ],
+          "creates": "store/qwen405.bin"
+        }
+      ],
+      "measured": [
+        {
+          "date": "2026-11-06",
+          "machine": "RTX 5090, Ryzen 9 9950X, 64 GB, Windows 11 + WSL2",
+          "engine": "exl3-offload",
+          "decode_tps": 59.7,
+          "prefill_tps": 5312,
+          "report": "research/vram-scaling-torch-2.15/REPORT.md"
+        }
+      ],
+      "cpu_execution": "none"
+    }
+  ]
+}

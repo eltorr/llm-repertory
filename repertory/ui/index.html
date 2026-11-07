@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repertory</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface-1: #fcfcfb; --surface-2: #f3f2ee;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+    --series-1: #2a78d6; --series-2: #eb6834; --track: #e1e0d9;
+    --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b; --accent: #2a78d6;
+    --good-text: #006300; --btn: #0b0b0b; --btn-text: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface-1: #1a1a19; --surface-2: #222220;
+      --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+      --series-1: #3987e5; --series-2: #d95926; --track: #2c2c2a;
+      --accent: #3987e5; --good-text: #0ca30c; --btn: #f0efec; --btn-text: #0b0b0b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  .viz-root { background: var(--page); color: var(--text-primary); min-height: 100vh;
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 20px 24px 40px; }
+  header { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+  header h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  header .sub { color: var(--text-secondary); }
+  .endpoint { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }
+  .endpoint code { background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 5px 9px;
+    color: var(--text-primary); font: 13px ui-monospace, Consolas, monospace; }
+  .grid { display: grid; gap: 14px; }
+  .row1 { grid-template-columns: 1.25fr 1fr 1.1fr; }
+  .row2 { grid-template-columns: 1fr 1.5fr; margin-top: 14px; }
+  @media (max-width: 1100px) { .row1, .row2 { grid-template-columns: 1fr; } }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .card h2 { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin: 0 0 12px; letter-spacing: .01em; }
+  .state { display: flex; align-items: center; gap: 10px; font-size: 26px; font-weight: 600; }
+  .icon { display: inline-flex; width: 22px; height: 22px; border-radius: 50%; align-items: center; justify-content: center;
+    font-size: 12px; color: #fff; flex: none; }
+  .icon.good { background: var(--good); } .icon.warning { background: var(--warning); color: #0b0b0b; }
+  .icon.critical { background: var(--critical); } .icon.accent { background: var(--accent); }
+  .icon.neutral { background: var(--text-muted); } .icon.serious { background: var(--serious); color: #0b0b0b; }
+  .meta { color: var(--text-secondary); margin-top: 6px; }
+  .meta b { color: var(--text-primary); font-weight: 600; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  button { font: inherit; border-radius: 7px; border: 1px solid var(--border); background: var(--surface-2);
+    color: var(--text-primary); padding: 6px 12px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--axis); }
+  button.primary { background: var(--btn); color: var(--btn-text); border-color: var(--btn); }
+  button:disabled { opacity: .45; cursor: default; }
+  .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px 18px; }
+  .tile .label { color: var(--text-secondary); font-size: 13px; }
+  .tile .value { font-size: 24px; font-weight: 600; }
+  .tile .note { color: var(--text-muted); font-size: 12px; }
+  .reasons { margin: 10px 0 0; padding-left: 18px; color: var(--text-secondary); }
+  .toggles { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+  label.switch { display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-secondary); }
+  .error { color: var(--critical); margin-top: 8px; font-size: 13px; word-break: break-word; }
+  /* segmented bars */
+  .seg-wrap { margin-bottom: 18px; }
+  .seg-head { display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .seg-head .t { font-weight: 600; } .seg-head .v { color: var(--text-secondary); }
+  .seg { display: flex; gap: 2px; height: 28px; }
+  .seg > div { border-radius: 4px; display: flex; align-items: center; padding-left: 8px; font-size: 12px;
+    font-weight: 600; white-space: nowrap; overflow: visible; min-width: 0; }
+  .seg .p-model { background: var(--series-1); color: #fff; }
+  .seg .p-other { background: var(--series-2); color: #fff; }
+  .seg .p-free { background: var(--track); color: var(--text-secondary); font-weight: 400; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; color: var(--text-secondary); font-size: 13px; margin-top: 8px; }
+  .legend > span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+    margin-right: 6px; vertical-align: -1px; background: var(--c); }
+  /* chart */
+  .chart { position: relative; }
+  .chart svg { width: 100%; height: 230px; display: block; }
+  .chart .gridline { stroke: var(--grid); stroke-width: 1; }
+  .chart .baseline { stroke: var(--axis); stroke-width: 1; }
+  .chart .tick { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .chart .endlabel { fill: var(--text-secondary); font-size: 12px; }
+  .chart .xhair { stroke: var(--axis); stroke-width: 1; }
+  .tooltip { position: fixed; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.18); display: none;
+    z-index: 10; min-width: 150px; }
+  .tooltip .r { display: flex; justify-content: space-between; gap: 14px; }
+  .tooltip .k::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 6px; background: var(--c); }
+  details { margin-top: 10px; color: var(--text-secondary); }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; margin-top: 8px; }
+  td, th { text-align: right; padding: 3px 8px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+  td:first-child, th:first-child { text-align: left; }
+  /* tabs */
+  .tabs { display: flex; gap: 4px; margin: 22px 0 0; border-bottom: 1px solid var(--grid); }
+  .tabs button { border: none; background: none; border-radius: 0; padding: 9px 14px; color: var(--text-secondary);
+    border-bottom: 2px solid transparent; }
+  .tabs button.on { color: var(--text-primary); border-bottom-color: var(--text-primary); font-weight: 600; }
+  .panel { display: none; padding-top: 16px; } .panel.on { display: block; }
+  .events { list-style: none; margin: 0; padding: 0; }
+  .events li { display: grid; grid-template-columns: 80px 80px 1fr; gap: 10px; padding: 6px 0;
+    border-bottom: 1px solid var(--grid); }
+  .events .t { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .events .k { color: var(--text-secondary); }
+  pre.console { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+    font: 12px/1.45 ui-monospace, Consolas, monospace; max-height: 420px; overflow: auto; white-space: pre-wrap;
+    margin: 0; color: var(--text-primary); }
+  /* settings: the four cards 2 x 2 (one column on narrow screens), equal height per row; in each row the label
+     takes the room and the control only what it needs */
+  .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(460px, 100%), 1fr)); gap: 14px; }
+  .form fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px 14px; background: var(--surface-1);
+    margin: 0; }
+  .form legend { font-weight: 600; padding: 0 6px; }
+  .field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; align-items: center; margin: 10px 0; }
+  .field label { line-height: 1.35; }
+  .field .help { grid-column: 1 / -1; color: var(--text-muted); font-size: 12px; margin-top: -2px; line-height: 1.4; }
+  .field input[type=number], .field input[type=text], .field select, textarea { font: inherit; background: var(--surface-2);
+    color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; width: 100%; }
+  .field select { width: auto; min-width: 180px; max-width: 100%; }
+  .field input[type=text] { width: min(260px, 100%); }
+  .form .wide { grid-column: 1 / -1; }
+  .linkrow { display: flex; gap: 8px; align-items: center; margin: 10px 0 4px; }
+  .linkrow code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 6px; padding: 5px 9px; }
+  body.remote .local-only { display: none !important; }
+  .field input[type=number] { width: 96px; text-align: right; font-variant-numeric: tabular-nums; }
+  .field input[type=checkbox] { width: 18px; height: 18px; margin: 0; justify-self: end; }
+  textarea { min-height: 80px; grid-column: 1 / -1; }
+  .steps { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+  .step { display: grid; grid-template-columns: 130px 1fr auto; gap: 12px; align-items: center; background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .step .st { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }
+  .step .title { font-weight: 600; } .step .desc { color: var(--text-muted); font-size: 12px; }
+  .benchbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+  .benchbar select { font: inherit; background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 8px; max-width: 100%; }
+  .benchtable td.err { text-align: left; color: var(--critical); }
+  .delta { color: var(--text-muted); font-size: 11px; }
+  .banner { display: none; background: var(--critical); color: #fff; padding: 8px 12px; border-radius: 8px; margin-bottom: 14px; }
+  .muted { color: var(--text-muted); }
+  .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; background: var(--surface-1); }
+  .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+  .notice { background: var(--surface-1); border: 1px solid var(--border); border-left: 4px solid var(--c);
+    border-radius: 8px; padding: 9px 12px; margin-bottom: 12px; display: none; }
+  .recs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .recs li { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: start; background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; }
+  .recs .d { color: var(--text-muted); font-size: 12px; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .facts > div { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .facts .k { color: var(--text-secondary); font-size: 12px; } .facts .v { font-weight: 600; }
+  .facts .n { color: var(--text-muted); font-size: 12px; }
+  h3 { font-size: 13px; color: var(--text-secondary); margin: 18px 0 8px; }
+  .form fieldset { min-width: 0; }
+  /* phones and narrow windows: stack label/input, step status/action, event time/message */
+  @media (max-width: 640px) {
+    .viz-root { padding: 12px 12px 32px; }
+    header { gap: 8px 12px; }
+    .endpoint { margin-left: 0; width: 100%; }
+    .endpoint code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; }
+    .card { padding: 14px; }
+    .field:has(select) { grid-template-columns: 1fr; }
+    .field select { width: 100%; }
+    .step { grid-template-columns: 1fr auto; gap: 6px 12px; }
+    .step > :nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+    .events li { grid-template-columns: auto 1fr; gap: 2px 10px; }
+    .events li > :nth-child(3) { grid-column: 1 / -1; }
+    .tabs { overflow-x: auto; }
+    .tabs button { padding: 10px 12px; }
+  }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <div class="banner" id="banner">Can't reach the Repertory service. Start it with Repertory.cmd on Windows or ./repertory.sh on Linux.</div>
+  <div class="notice" id="observeNote" style="--c:var(--accent)">Observe mode: this dashboard watches the machine but never starts, stops or resizes the model.</div>
+  <div class="notice" id="recNote" style="--c:var(--warning)"></div>
+  <header>
+    <h1>Repertory</h1>
+    <span class="sub" id="gpuName"></span>
+    <span class="badge" id="platformBadge"></span>
+    <span class="badge" id="syncBadge" style="display:none"></span>
+    <div class="endpoint">API <code id="endpoint">…</code> <button id="copyBtn" title="Copy endpoint">Copy</button></div>
+  </header>
+
+  <div class="grid row1">
+    <section class="card">
+      <h2>Model</h2>
+      <div class="state"><span class="icon" id="stateIcon"></span><span id="stateText">…</span></div>
+      <div class="meta" id="stateMeta"></div>
+      <div class="error" id="stateError"></div>
+      <div class="meta" id="learnedNote" style="display:none"></div>
+      <div class="buttons">
+        <button class="primary" data-act="start_full" title="Use all spare VRAM/RAM (fastest)">Start full</button>
+        <button data-act="start_lean" title="A smaller VRAM budget and RAM cache that coexist with other GPU apps">Start lean</button>
+        <button data-act="pause" title="Stop the model and free all GPU/RAM. Requests will wake it if wake-on-request is on.">Pause</button>
+        <button data-act="restart">Restart</button>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Requests</h2>
+      <div class="tiles">
+        <div class="tile"><div class="label">In progress</div><div class="value" id="tInflight">0</div></div>
+        <div class="tile"><div class="label">Waiting for model</div><div class="value" id="tHeld">0</div></div>
+        <div class="tile"><div class="label">Served</div><div class="value" id="tServed">0</div><div class="note" id="tFailed"></div></div>
+        <div class="tile"><div class="label">Last request</div><div class="value" id="tLast">-</div></div>
+        <div class="tile"><div class="label">Generation speed</div><div class="value" id="tDecode">-</div><div class="note" id="tDecodeNote"></div></div>
+        <div class="tile"><div class="label">Prompt speed</div><div class="value" id="tPrefill">-</div><div class="note" id="tPrefillNote"></div></div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Other apps &amp; auto-switch</h2>
+      <div class="state" style="font-size:20px"><span class="icon" id="presIcon"></span><span id="presText">…</span></div>
+      <ul class="reasons" id="presReasons"></ul>
+      <div class="toggles">
+        <label class="switch"><input type="checkbox" id="autoToggle"> Auto-switch: scale back / pause when other apps need the GPU or RAM</label>
+        <label class="switch"><input type="checkbox" id="wakeToggle"> Wake on request: start the model when a client calls it</label>
+      </div>
+      <div class="meta" id="overrideNote"></div>
+    </section>
+  </div>
+
+  <div class="grid row2">
+    <section class="card">
+      <h2>Resources now</h2>
+      <div class="seg-wrap">
+        <div class="seg-head"><span class="t">GPU memory</span><span class="v" id="vramTotal"></span></div>
+        <div class="seg" id="vramBar" role="img"></div>
+      </div>
+      <div class="seg-wrap">
+        <div class="seg-head"><span class="t">System RAM</span><span class="v" id="ramTotal"></span></div>
+        <div class="seg" id="ramBar" role="img"></div>
+      </div>
+      <div class="legend"><span style="--c:var(--series-1)">Model</span><span style="--c:var(--series-2)">Other apps &amp; <span class="osname">desktop</span></span><span style="--c:var(--track)">Free</span></div>
+      <div class="tiles" style="margin-top:16px">
+        <div class="tile"><div class="label">GPU load, whole card</div><div class="value" id="gpuUtil">-</div></div>
+        <div class="tile"><div class="label">GPU load, other apps</div><div class="value" id="extUtil">-</div><div class="note" id="extTop"></div></div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>GPU memory over time (GB)</h2>
+      <div class="chart" id="chart"><svg id="svg" viewBox="0 0 760 230" preserveAspectRatio="none" aria-label="GPU memory used by the model and by other apps over the last few minutes"></svg></div>
+      <div class="legend"><span style="--c:var(--series-1)">Model</span><span style="--c:var(--series-2)">Other apps &amp; <span class="osname">desktop</span></span></div>
+      <details><summary>Show as table</summary><table id="histTable"></table></details>
+    </section>
+  </div>
+
+  <nav class="tabs">
+    <button class="on" data-tab="activity">Activity</button>
+    <button data-tab="settings">Settings</button>
+    <button data-tab="setup">Setup</button>
+    <button data-tab="bench">Benchmark</button>
+    <button data-tab="logs">Logs</button>
+  </nav>
+  <section class="panel on" id="p-activity"><ul class="events" id="events"></ul></section>
+  <section class="panel" id="p-settings">
+    <div class="form" id="form"></div>
+    <div class="buttons">
+      <button class="primary" id="saveBtn">Save settings</button>
+      <span class="muted" id="saveMsg"></span>
+      <button id="forgetBtn" title="Forget VRAM/RAM caps learned from out-of-memory crashes">Forget learned limits</button>
+      <label class="switch local-only" style="margin-left:auto"><input type="checkbox" id="autostartToggle"> <span id="autostartLabel">Start the service when I sign in</span></label>
+      <button class="local-only" id="quitKeepBtn" title="Quit the dashboard service but leave the model running; the next start picks it up">Quit, keep model</button>
+      <button class="local-only" id="quitBtn" title="Stops the model and the service; clients get no answer until you start it again">Quit service</button>
+    </div>
+  </section>
+  <section class="panel" id="p-setup">
+    <div class="buttons" style="margin:0 0 12px"><button id="checkBtn">Re-check</button><span class="muted" id="setupDetail"></span></div>
+    <div class="facts" id="facts"></div>
+    <h3>Recommendations for this machine</h3>
+    <ul class="recs" id="recs"></ul>
+    <h3>Setup steps <span class="muted" id="platformNote"></span></h3>
+    <div class="steps" id="steps"></div>
+    <pre class="console" id="setupOut">Output of setup steps appears here.</pre>
+  </section>
+  <section class="panel" id="p-bench">
+    <p class="muted" style="margin-top:0">Measures this machine: starts the model
+      in each configuration, times short answers to their natural end with thinking off, and times reading documents of
+      fixed sizes. It takes the GPU: the model stops for the run, requests get an
+      error meanwhile, and the model comes back afterwards. When a game or another app needs the GPU or RAM, the run steps
+      aside and starts again once the PC is free. <code>repertory bench</code> does the same from a terminal.</p>
+    <div class="benchbar local-only">
+      <select id="benchRuns" aria-label="What to measure"></select>
+      <select id="benchWorkload" aria-label="Workload">
+        <option value="quick">Quick · about 2 min a run</option>
+        <option value="standard">Standard · about 3-6 min a run</option>
+      </select>
+      <button class="primary" id="benchStart">Start benchmark</button>
+      <button id="benchCancel" style="display:none">Cancel</button>
+      <button id="benchResume" style="display:none">Resume</button>
+      <span class="muted" id="benchMsg"></span>
+    </div>
+    <div class="benchbar"><span class="muted" id="benchWhich"></span><select id="benchHistory" aria-label="Earlier results"></select></div>
+    <div style="overflow-x:auto"><table class="benchtable" id="benchTable"></table></div>
+    <pre class="console" id="benchOut">Benchmark output appears here.</pre>
+  </section>
+  <section class="panel" id="p-logs">
+    <h2 style="font-size:13px;color:var(--text-secondary)">Model server</h2><pre class="console" id="logBackend"></pre>
+    <h2 style="font-size:13px;color:var(--text-secondary);margin-top:14px">Manager</h2><pre class="console" id="logSwitcher"></pre>
+  </section>
+  <div class="tooltip" id="tip"></div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+// opened from another device through the private link: hide what only makes sense at the PC
+const REMOTE = !["127.0.0.1", "localhost", "[::1]", "::1"].includes(location.hostname);
+if (REMOTE) document.body.classList.add("remote");
+async function copyText(text, btn) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {  // plain http from another device has no clipboard API
+    const a = document.createElement("textarea"); a.value = text; document.body.appendChild(a); a.select();
+    document.execCommand("copy"); a.remove();
+  }
+  if (btn) { const t = btn.textContent; btn.textContent = "Copied"; setTimeout(() => (btn.textContent = t), 1200); }
+}
+const API = "/_switcher/api/";
+const gb = (b) => (b / 1e9).toFixed(1);
+let S = null, CFG = null, DEF = null, tab = "activity", setupSeq = 0;
+
+async function api(path, body) {
+  const r = await fetch(API + path, body === undefined ? {} :
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (r.status === 401) { location.reload(); return {}; }   // the private link's cookie expired: show the sign-in page
+  return r.json();
+}
+function ago(t) {
+  if (!t) return "-";
+  const s = Math.max(0, S.now - t);
+  if (s < 60) return Math.round(s) + "s ago";
+  if (s < 3600) return Math.round(s / 60) + " min ago";
+  return Math.round(s / 3600) + " h ago";
+}
+function dur(s) { if (s == null) return "-"; s = Math.round(s); return s < 90 ? s + "s" : s < 5400 ? Math.round(s / 60) + " min" : (s / 3600).toFixed(1) + " h"; }
+
+const STATES = {
+  running_full: ["good", "●", "Full", "using the free VRAM"],
+  running_lean: ["warning", "◐", "Lean", "scaled back to share the GPU"],
+  running_unknown: ["good", "●", "Running", "observed"],
+  starting: ["accent", "↻", "Starting", ""], stopping: ["accent", "↻", "Stopping", ""],
+  resizing: ["accent", "↻", "Resizing", ""],
+  stopped: ["neutral", "‖", "Paused", ""], error: ["critical", "✕", "Error", ""],
+  bench: ["accent", "◷", "Benchmarking", ""],
+};
+const PRESSURE = { none: ["good", "✓", "No pressure"], moderate: ["warning", "▲", "Moderate pressure"],
+                   severe: ["critical", "■", "Heavy pressure"] };
+const PAUSE_WHY = { pressure: "paused because other apps needed resources", manual: "paused from the dashboard",
+                    idle: "paused after being idle", benchmark: "stopped for a benchmark" };
+
+function renderStatus() {
+  $("banner").style.display = "none";
+  $("gpuName").textContent = S.gpu.name || "";
+  $("platformBadge").innerHTML = `<span class="dot" style="--c:var(--accent)"></span>${esc(S.platform_label)}`;
+  document.querySelectorAll(".osname").forEach((e) => e.textContent = S.platform === "windows-wsl" ? "Windows" : "system");
+  $("observeNote").style.display = S.observe ? "block" : "none";
+  const sy = S.engine_sync;
+  if (sy && sy.separate) {
+    $("syncBadge").style.display = "";
+    $("syncBadge").innerHTML = sy.in_sync ? `<span class="dot" style="--c:var(--good)"></span>engine ${esc(sy.engine)}` :
+      `<span class="dot" style="--c:var(--warning)"></span>engine ${esc(sy.engine)}, repo ${esc(sy.repo)}: update in Setup`;
+  }
+  const bad = (S.recommendations || []).filter((r) => r.level === "error" || r.level === "warn");
+  $("recNote").style.display = bad.length ? "block" : "none";
+  $("recNote").innerHTML = bad.map((r) => `<b>${esc(r.title)}</b>${r.detail ? " · " + esc(r.detail) : ""}`).join("<br>") +
+    (bad.length ? ` <a href="#" onclick="showTab('setup');return false">Details</a>` : "");
+  $("endpoint").textContent = REMOTE ? location.origin + "/v1" : S.endpoint;
+  updateRemoteLink();
+  const key = S.bench_running ? "bench" : S.state === "running" ? "running_" + S.tier : S.state;
+  const [cls, ic, label, sub] = STATES[key] || STATES.error;
+  $("stateIcon").className = "icon " + cls; $("stateIcon").textContent = ic;
+  $("stateText").textContent = label + (S.state === "starting" || S.state === "running" ? " · " + (S.tier || "") : "");
+  if (S.state === "running") $("stateText").textContent = label;
+  const q = S.quants[S.quant] ? S.quants[S.quant].label : S.quant;
+  let meta = `<b>${q}</b> · ${Math.round(S.context / 1024)}K context`;
+  if (S.state === "running" && S.manual_lean && S.tier === "lean") meta += " · chosen by hand: stays lean until you start full";
+  if (S.state === "running") meta += ` · ${sub}${S.budget_gb ? ` · <b>${S.budget_gb} GB</b> VRAM budget` : ""}${S.ram_cache_gib != null ? ` · ${S.ram_cache_gib} GiB RAM cache` : ""} · up ${dur(S.now - S.since)}${S.adopted ? " · kept across a manager restart" : S.startup_s ? ` · started in ${dur(S.startup_s)}` : ""}`;
+  else if (S.state === "starting") meta += ` · starting ${S.tier} for ${dur(S.now - S.since)} (usually ~1 min)`;
+  else if (S.state === "resizing") meta += S.target === S.tier ? " · resizing the RAM cache without a restart"
+    : ` · switching to ${S.target} without a restart`;
+  if (S.ram_growing && S.state === "running") meta += ` · growing the RAM cache to ${S.ram_cache_gib} GiB in the background`;
+  if (S.bench_running) meta += ` · the model is set aside until the benchmark ends · <a href="#" onclick="showTab('bench');return false">${S.bench_waiting ? "waiting for the PC: " + esc(S.bench_waiting.join(", ")) : S.bench_current ? "running " + esc(S.bench_current) : "see progress"}</a>`;
+  else if (S.state === "stopped") meta += ` · ${PAUSE_WHY[S.paused_reason] || "not loaded"}`;
+  const P = S.plans || {};
+  if (P.full && P.lean) {
+    meta += `<br><span class="muted">Fits now: full ${P.full.ok ? P.full.budget_gb + " GB" : "no"} · lean ${P.lean.ok ? P.lean.budget_gb + " GB" : "no"}` +
+      `${P.full.ok && !P.full.staging ? " · staging-free (experimental)" : ""}${P.full.ok && P.full.chunk ? ` · prefill chunk ${P.full.chunk}` : ""}</span>`;
+    document.querySelector('[data-act="start_full"]').title = P.full.ok ? `About ${P.full.budget_gb} GB of VRAM (all that is free)` : (P.full.reason || "does not fit now");
+    document.querySelector('[data-act="start_lean"]').title = P.lean.ok ? `About ${P.lean.budget_gb} GB of VRAM; coexists with other GPU apps` : (P.lean.reason || "does not fit now");
+  }
+  $("stateMeta").innerHTML = meta;
+  const L = S.learned;
+  $("learnedNote").style.display = L && (L.vram_cap || L.ram_cap) ? "" : "none";
+  if (L) $("learnedNote").textContent = `Learned after out-of-memory crashes: ${L.vram_cap ? "VRAM budget " + gb(L.vram_cap) + " GB " : ""}${L.ram_cap ? "RAM cache " + L.ram_cap + " GiB" : ""} (Settings: Forget learned limits)`;
+  $("stateError").textContent = S.state === "error" || (S.error && S.state !== "running") ? (S.error || "") : "";
+  document.querySelectorAll("[data-act]").forEach((b) => {
+    const a = b.dataset.act;
+    b.disabled = S.transition || !!S.setup_running || S.bench_running ||
+      (a === "start_full" && S.state === "running" && S.tier === "full") ||
+      (a === "start_lean" && S.state === "running" && S.tier === "lean") ||
+      (a === "pause" && S.state === "stopped") || (a === "restart" && S.state !== "running") || S.observe;
+  });
+  const mt = S.metrics || {};
+  $("tDecode").textContent = mt.decode_tps != null ? mt.decode_tps + " tok/s" : "-";
+  $("tDecodeNote").textContent = !mt.count ? "after the first request"
+    : mt.decode_tps != null ? `median of recent requests · ${mt.tokens_out.toLocaleString()} tokens out`
+    : `measured on streamed requests · ${mt.tokens_out.toLocaleString()} tokens out so far`;
+  $("tPrefill").textContent = mt.prefill_tps != null ? Math.round(mt.prefill_tps).toLocaleString() + " tok/s" : "-";
+  $("tPrefillNote").textContent = mt.ttft_s != null ? `first token in ${mt.ttft_s} s (median)` : "";
+  $("tInflight").textContent = S.in_flight; $("tHeld").textContent = S.held; $("tServed").textContent = S.served;
+  $("tFailed").textContent = S.failed ? S.failed + " refused or failed" : "";
+  $("tLast").textContent = S.last_request ? ago(S.last_request) : "-";
+  const [pc, pi, pl] = PRESSURE[S.pressure.level];
+  $("presIcon").className = "icon " + pc; $("presIcon").textContent = pi; $("presText").textContent = pl;
+  $("presReasons").innerHTML = (S.pressure.reasons.length ? S.pressure.reasons : ["Nothing else needs the GPU or RAM right now"])
+    .map((r) => `<li>${esc(r)}</li>`).join("");
+  $("autoToggle").checked = CFG ? CFG.auto_switch : true;
+  $("wakeToggle").checked = CFG ? CFG.wake_on_request : true;
+  $("overrideNote").textContent = S.override_until ? `You called the model under pressure, so auto-switch holds off until ${new Date(S.override_until * 1000).toLocaleTimeString()}.` : "";
+  $("autostartToggle").checked = S.autostart;
+  $("autostartLabel").textContent = S.platform === "windows-wsl" ? "Start the service when I sign in to Windows" : "Start at login (systemd user service)";
+  renderBars(); renderChart();
+  $("events").innerHTML = S.events.slice().reverse().map(([t, k, m]) =>
+    `<li><span class="t">${new Date(t * 1000).toLocaleTimeString()}</span><span class="k">${esc(k)}</span><span>${esc(m)}</span></li>`).join("");
+}
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+function segBar(el, parts, total) {
+  el.innerHTML = "";
+  el.setAttribute("aria-label", parts.map((p) => `${p.name} ${gb(p.v)} GB`).join(", "));
+  for (const p of parts) {
+    if (p.v <= 0) continue;
+    const d = document.createElement("div");
+    d.className = p.cls; d.style.flex = `${p.v} 1 0`;
+    const share = Math.round((p.v / total) * 100);
+    const text = `${gb(p.v)} GB`;
+    // only print the label when it fits comfortably (approx 7px per char + padding)
+    if ((el.clientWidth * p.v) / total > text.length * 7 + 18) d.textContent = text;
+    d.addEventListener("mousemove", (e) => tip(e, `<div class="r"><span class="k" style="--c:${p.c}">${p.name}</span><b>${text}</b></div><div class="muted">${share}% of ${gb(total)} GB</div>`));
+    d.addEventListener("mouseleave", hideTip);
+    el.appendChild(d);
+  }
+}
+function renderBars() {
+  const g = S.gpu;
+  if (g.total) {
+    const free = Math.max(0, g.total - g.used);
+    $("vramTotal").textContent = `${gb(g.used)} of ${gb(g.total)} GB used`;
+    segBar($("vramBar"), [{ name: "Model", v: g.own, cls: "p-model", c: "var(--series-1)" },
+      { name: "Other apps & desktop", v: g.ext, cls: "p-other", c: "var(--series-2)" },
+      { name: "Free", v: free, cls: "p-free", c: "var(--track)" }], g.total);
+    $("gpuUtil").textContent = g.util != null ? g.util + "%" : "-";
+    $("extUtil").textContent = g.ext_util != null ? Math.round(g.ext_util) + "%" : "-";
+    $("extTop").textContent = (g.ext_util_top || []).slice(0, 3).map(([n, v]) => `${n} ${v}%`).join(" · ");
+  }
+  const r = S.ram;
+  if (r.total) {
+    const used = r.total - r.avail, model = Math.min(r.model_est || 0, used);
+    $("ramTotal").textContent = `${gb(used)} of ${gb(r.total)} GB used`;
+    segBar($("ramBar"), [{ name: "Model (estimate)", v: model, cls: "p-model", c: "var(--series-1)" },
+      { name: "Other apps & system", v: used - model, cls: "p-other", c: "var(--series-2)" },
+      { name: "Free", v: r.avail, cls: "p-free", c: "var(--track)" }], r.total);
+  }
+}
+
+// ---- line chart: model vs other apps VRAM, crosshair + tooltip
+// drawn at the chart's real pixel width (1 unit = 1 px), so text keeps its size on narrow screens
+let W = 760;
+const H = 230, M = { l: 34, r: 112, t: 10, b: 22 };
+function renderChart() {
+  const h = S.history, svg = $("svg"), total = (S.gpu.total || 34e9) / 1e9;
+  W = Math.max(280, Math.round(svg.getBoundingClientRect().width) || 760);
+  M.r = W < 520 ? 96 : 112;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  if (!h.length) { svg.innerHTML = ""; return; }
+  const t1 = h[h.length - 1][0], t0 = Math.min(h[0][0], t1 - 60);
+  const x = (t) => M.l + ((t - t0) / (t1 - t0 || 1)) * (W - M.l - M.r);
+  const ymax = Math.ceil(total / 8) * 8, y = (v) => H - M.b - (v / ymax) * (H - M.t - M.b);
+  let out = "";
+  for (let v = 0; v <= ymax; v += 8)
+    out += `<line class="${v ? "gridline" : "baseline"}" x1="${M.l}" x2="${W - M.r}" y1="${y(v)}" y2="${y(v)}"/><text class="tick" x="${M.l - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
+  const span = Math.round((t1 - t0) / 60);
+  out += `<text class="tick" x="${M.l}" y="${H - 5}">${span} min ago</text><text class="tick" x="${W - M.r}" y="${H - 5}" text-anchor="end">now</text>`;
+  const series = [{ i: 2, c: "var(--series-1)", name: "Model" }, { i: 1, c: "var(--series-2)", name: "Other apps" }];
+  const ends = [];
+  for (const s of series) {
+    const pts = h.map((p) => `${x(p[0]).toFixed(1)},${y(p[s.i]).toFixed(1)}`).join(" ");
+    out += `<polyline points="${pts}" fill="none" stroke="${s.c}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>`;
+    const last = h[h.length - 1][s.i];
+    ends.push({ y: y(last), v: last, s });
+  }
+  for (const e of ends) out += `<circle cx="${x(t1)}" cy="${e.y}" r="4" fill="${e.s.c}" stroke="var(--surface-1)" stroke-width="2"/>`;
+  // direct end labels only when they don't collide; legend + tooltip carry identity otherwise
+  if (Math.abs(ends[0].y - ends[1].y) >= 16)
+    for (const e of ends) out += `<text class="endlabel" x="${x(t1) + 10}" y="${e.y + 4}">${e.s.name} ${e.v.toFixed(1)}</text>`;
+  out += `<line id="xh" class="xhair" x1="0" x2="0" y1="${M.t}" y2="${H - M.b}" style="display:none"/>`;
+  out += `<rect x="${M.l}" y="${M.t}" width="${W - M.l - M.r}" height="${H - M.t - M.b}" fill="transparent" id="hit"/>`;
+  svg.innerHTML = out;
+  const hit = $("hit");
+  hit.onmousemove = (e) => {
+    const box = svg.getBoundingClientRect(), px = ((e.clientX - box.left) / box.width) * W;
+    const t = t0 + ((px - M.l) / (W - M.l - M.r)) * (t1 - t0);
+    let best = h[0]; for (const p of h) if (Math.abs(p[0] - t) < Math.abs(best[0] - t)) best = p;
+    const xh = $("xh"); xh.style.display = ""; xh.setAttribute("x1", x(best[0])); xh.setAttribute("x2", x(best[0]));
+    tip(e, `<div class="muted">${new Date(best[0] * 1000).toLocaleTimeString()}</div>` +
+      `<div class="r"><span class="k" style="--c:var(--series-1)">Model</span><b>${best[2].toFixed(1)} GB</b></div>` +
+      `<div class="r"><span class="k" style="--c:var(--series-2)">Other apps</span><b>${best[1].toFixed(1)} GB</b></div>` +
+      `<div class="r"><span class="muted">GPU load</span><span>${best[4]}%</span></div>`);
+  };
+  hit.onmouseleave = () => { hideTip(); $("xh").style.display = "none"; };
+  const rows = h.slice(-20).reverse();
+  $("histTable").innerHTML = "<tr><th>Time</th><th>Model GB</th><th>Other apps GB</th><th>RAM used GB</th><th>GPU load</th></tr>" +
+    rows.map((p) => `<tr><td>${new Date(p[0] * 1000).toLocaleTimeString()}</td><td>${p[2].toFixed(1)}</td><td>${p[1].toFixed(1)}</td><td>${p[3].toFixed(1)}</td><td>${p[4]}%</td></tr>`).join("");
+}
+function tip(e, html) {
+  const t = $("tip"); t.innerHTML = html; t.style.display = "block";
+  const x = Math.min(e.clientX + 14, window.innerWidth - t.offsetWidth - 8);
+  t.style.left = x + "px"; t.style.top = (e.clientY + 14) + "px";
+}
+function hideTip() { $("tip").style.display = "none"; }
+
+// ---- settings form
+const FIELDS = [
+  ["Model", [
+    ["quant", "Model version", "select", [["3.05", "3.05 bpw: fastest"], ["4.05", "4.05 bpw: higher fidelity (more RAM)"]], "Changing this restarts the model."],
+    ["context", "Context window", "select", [[16384, "16K"], [32768, "32K"], [65536, "64K"], [98304, "96K"], [131072, "128K"], [196608, "192K"], [262144, "256K (max)"]], "Keep your client's context setting the same. Smaller windows leave more VRAM for the expert cache (matters on 12-16 GB cards)."],
+  ]],
+  ["When other apps need resources", [
+    ["pressure_response", "Moderate pressure", "select", [["lean", "Scale back to lean"], ["pause", "Pause"]], "Heavy pressure always pauses."],
+    ["live_resize", "Switch between full and lean without a restart", "check", null, "When only VRAM is short: about half a second instead of a 45 s restart, and the caches stay warm."],
+    ["live_ram_resize", "Resize the RAM cache without a restart too", "check", null, "When RAM is short, lean's RAM cache in place in 3-4 s instead of a 45 s restart, and full's again (10-20 s) when RAM frees up. Needs the setting above."],
+    ["gpu_busy_action", "Another app is using the GPU heavily", "select", [["lean", "Counts as moderate"], ["pause", "Counts as heavy (pause)"]]],
+    ["ext_util_pct", "GPU load threshold (%)", "number", null, "Another app's GPU load at or above this counts as busy."],
+    ["ext_vram_lean_gb", "Other apps' VRAM threshold (GB)", "number", null, "Above this, run lean. 0 = automatic (a quarter of the card). The desktop itself uses 1-2.5 GB."],
+    ["ram_lean_gb", "Free RAM: scale back below (GB)", "number"],
+    ["ram_pause_gb", "Free RAM: pause below (GB)", "number"],
+    ["watchlist", "Always pause while these programs run", "textarea", null, "One process name per line, e.g. eldenring.exe (Windows) or blender (Linux)"],
+  ]],
+  ["Waking & re-saturating", [
+    ["upgrade_when_idle", "Go back to full when resources free up (while idle)", "check"],
+    ["preload_when_free", "Reload after a pressure pause without waiting for a request", "check"],
+    ["preload_on_launch", "Load the model when the service starts", "check"],
+    ["wake_override_min", "After you call it under pressure, stay up for (min)", "number"],
+    ["idle_unload_min", "Unload after idle for (min, 0 = never)", "number"],
+    ["busy_wait_s", "Hold a request while GPU is busy for up to (s)", "number"],
+  ]],
+  ["Budgets", [
+    ["lean_vram_gb", "Lean profile VRAM (GB)", "number", null, "0 = automatic: about half the card, at least what the context needs."],
+    ["full_vram_headroom_gb", "VRAM left free in full mode (GB)", "number", null, "0 = automatic: ~10% of the card (1.2-2.4 GB)."],
+    ["lean_ram_gb", "Lean profile RAM cache (GiB)", "number"],
+    ["max_ram_cache_gib", "Largest RAM cache in full mode (GiB)", "number", null, "0 = automatic: with the VRAM cache, 90% of the experts (the rest are rarely used), within what the system can spare."],
+    ["ram_reserve_gb", "RAM always left for the system and other apps (GB)", "number"],
+    ["auto_recover", "Restart the model automatically if it crashes", "check", null, "After an out-of-memory crash the next start uses a smaller budget."],
+  ]],
+];
+function renderForm() {
+  $("form").innerHTML = FIELDS.map(([title, fs]) => `<fieldset><legend>${title}</legend>` + fs.map(([k, label, type, opts, help]) => {
+    const v = CFG[k]; let input;
+    if (type === "select") input = `<select data-k="${k}">${opts.map(([ov, ol]) => `<option value="${ov}" ${String(ov) === String(v) ? "selected" : ""}>${ol}</option>`).join("")}</select>`;
+    else if (type === "check") input = `<input type="checkbox" data-k="${k}" ${v ? "checked" : ""}>`;
+    else if (type === "textarea") input = `<textarea data-k="${k}">${esc((v || []).join("\n"))}</textarea>`;
+    else input = `<input type="number" step="any" data-k="${k}" value="${v}">`;
+    return `<div class="field"><label>${label}</label>${type === "textarea" ? "" : input}${type === "textarea" ? input : ""}${help ? `<div class="help">${help}</div>` : ""}</div>`;
+  }).join("") + `</fieldset>`).join("") + remoteFieldset();
+  if ($("remoteCopy")) {
+    $("remoteCopy").onclick = () => copyText(remoteLink(), $("remoteCopy"));
+    $("remoteNew").onclick = async () => {
+      if (!confirm("Make a new private link? The old link stops working on every device that uses it.")) return;
+      await api("action", { action: "new_remote_link" }); await loadConfig();
+    };
+  }
+  updateRemoteLink();
+}
+
+// ---- the dashboard on other devices (the network port, with a private link)
+function remoteFieldset() {
+  if (!CFG.network_port || REMOTE) return "";
+  const name = (S && S.remote && S.remote.host) || "";
+  return `<fieldset class="wide"><legend>Other devices</legend>
+    <div class="field"><label>This PC's name for other devices</label>
+      <input type="text" data-k="remote_host" value="${esc(CFG.remote_host || "")}" placeholder="${esc(name)}">
+      <div class="help">Used in the link below, such as its tailnet name. Empty uses the computer name.</div></div>
+    <div class="linkrow"><code id="remoteLink"></code><button type="button" id="remoteCopy">Copy</button>
+      <button type="button" id="remoteNew">New link</button></div>
+    <div class="field"><div class="help">Open this private link on your phone or another device to use this dashboard
+      there; the device remembers it. Anyone with the link gets full control, so keep it to yourself. <b>New link</b>
+      stops the old one from working. Without the link, port ${CFG.network_port} only serves the API.</div></div>
+  </fieldset>`;
+}
+function remoteLink() {
+  if (!CFG.dashboard_token) return "The link appears after the service restarts.";
+  const host = CFG.remote_host || (S && S.remote && S.remote.host) || "this-pc";
+  return `http://${host}:${CFG.network_port}/?token=${encodeURIComponent(CFG.dashboard_token)}`;
+}
+function updateRemoteLink() {
+  if (!$("remoteLink") || !CFG) return;
+  $("remoteLink").textContent = remoteLink();
+  const name = document.querySelector('[data-k="remote_host"]');
+  if (name && S && S.remote) name.placeholder = S.remote.host;
+}
+async function saveSettings() {
+  const changes = {};
+  document.querySelectorAll("#form [data-k]").forEach((el) => {
+    changes[el.dataset.k] = el.type === "checkbox" ? el.checked : el.value;
+  });
+  const r = await api("config", { config: changes });
+  $("saveMsg").textContent = r.message || (r.ok ? "saved" : "error");
+  await loadConfig();
+}
+async function loadConfig() { const r = await api("config"); CFG = r.config; DEF = r.defaults; renderForm(); }
+
+// ---- setup
+const SETUP_ST = { ok: ["good", "✓", "Done"], missing: ["neutral", "○", "Not done"], running: ["accent", "↻", "Running"],
+                   outdated: ["warning", "↑", "Update available"],
+                   failed: ["critical", "✕", "Failed"], unknown: ["neutral", "?", "Checking"] };
+async function pollSetup() {
+  const r = await api("setup?since=" + setupSeq);
+  $("steps").innerHTML = r.steps.map((s) => {
+    const [c, i, l] = SETUP_ST[s.status] || SETUP_ST.unknown;
+    const verb = s.status === "ok" ? "Run again" : s.status === "outdated" ? "Update" : "Run";
+    return `<div class="step"><div class="st"><span class="icon ${c}">${i}</span>${l}</div>` +
+      `<div><div class="title">${esc(s.title)}</div><div class="desc">${esc(s.desc)}</div></div>` +
+      `<button data-step="${s.id}" ${r.running ? "disabled" : ""}>${verb}</button></div>`;
+  }).join("");
+  document.querySelectorAll("[data-step]").forEach((b) => b.onclick = async () => {
+    if (!confirm(`Run "${b.closest(".step").querySelector(".title").textContent}"?`)) return;
+    await api("setup/run", { step: b.dataset.step }); pollSetup();
+  });
+  $("setupDetail").textContent = r.checking ? "checking…" : "";
+  $("platformNote").textContent = r.platform === "windows-wsl" ? `· Windows + WSL2${r.location ? " · new distro location: " + r.location : ""}` : "· native Linux";
+  if (r.lines.length) {
+    const o = $("setupOut");
+    if (setupSeq === 0) o.textContent = "";
+    o.textContent += r.lines.map((l) => l[1]).join("\n") + "\n";
+    o.scrollTop = o.scrollHeight;
+    setupSeq = r.seq;
+  }
+  return r.running;
+}
+
+async function loadHardware(refresh) {
+  const hw = await api("hardware", refresh ? {} : undefined);   // POST looks again
+  if (!hw || !hw.host) return;
+  const g = (hw.gpus || [])[0], e = hw.engine || {}, w = hw.wsl, wc = hw.wslconfig || {};
+  const F = [];
+  F.push(["Platform", hw.host.label, (hw.host.os || "") + (hw.host.in_wsl ? " (inside WSL)" : "")]);
+  if (g) F.push(["GPU", `${g.name} · ${(g.vram_total / 2 ** 30).toFixed(0)} GB`, `sm_${(g.compute_capability || "?").replace(".", "")} · PCIe ${g.pcie_gen_max}.0 x${g.pcie_width_max} · driver ${hw.driver.version || "?"}${hw.gpus.length > 1 ? ` · ${hw.gpus.length} GPUs` : ""}`]);
+  F.push(["CPU & RAM", `${hw.cpu.name || "?"}`, `${hw.cpu.cores} cores · ${hw.ram.total_gb} GB RAM, ${hw.ram.avail_gb} GB free now`]);
+  if (w) F.push(["WSL", w.installed ? `WSL ${w.version || ""}` : "not installed", `${w.distro}: ${w.distro_present ? "WSL " + w.distro_wsl_version + (w.distro_path ? " at " + w.distro_path : "") : "not installed"} · .wslconfig memory ${wc.memory_gb ? wc.memory_gb + " GB" : "default (half the RAM)"}`]);
+  if (e && e.driver) F.push(["Engine", e.engine === "1" ? "ready" : "not set up", [`CUDA ${e.cuda_version || "-"}`, `torch ${e.torch || "-"}`, e.build_arch && `built for ${e.build_arch}`,
+    e.disk_free_gb && `${e.disk_free_gb} GB free` + (e.fs ? ` (${e.fs})` : "")].filter(Boolean).join(" · ")]);
+  if (hw.repo && hw.repo.head) F.push(["This checkout", hw.repo.subject || hw.repo.head.slice(0, 7), hw.repo.dirty ? "uncommitted changes (the engine gets committed code only)" : "clean"]);
+  $("facts").innerHTML = F.map(([k, v, n]) => `<div><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="n">${esc(n || "")}</div></div>`).join("");
+  const LV = { ok: ["good", "✓"], info: ["accent", "i"], warn: ["warning", "!"], error: ["critical", "✕"] };
+  $("recs").innerHTML = (hw.recommendations || []).map((r, i) => {
+    const [c, ic] = LV[r.level] || LV.info;
+    const st = Object.keys(r.settings || {}).length ? `<button data-rec="${i}" title="${esc(Object.entries(r.settings).map(([k, v]) => k + " = " + v).join(", "))}">${esc(r.apply_label || "Apply " + Object.entries(r.settings).map(([k, v]) => k + " " + v).join(", "))}</button>` : "<span></span>";
+    return `<li><span class="icon ${c}">${ic}</span><div><div>${esc(r.title)}</div><div class="d">${esc(r.detail || "")}</div></div>${st}</li>`;
+  }).join("");
+  document.querySelectorAll("[data-rec]").forEach((b) => b.onclick = async () => {
+    const r = hw.recommendations[+b.dataset.rec];
+    const res = await api("config", { config: r.settings });
+    alertMsg(res.message); await loadConfig(); loadHardware(true);
+  });
+}
+// ---- benchmark
+let benchSeq = 0, benchShown = null;
+const PRESET_ORDER = ["current", "lean", "quants", "matrix"];
+function benchCell(v, unit = " tok/s", digits = 0) { return v == null ? "-" : Number(v).toLocaleString(undefined, { maximumFractionDigits: digits }) + unit; }
+function benchDelta(p) { return p == null ? "" : ` <span class="delta">${p > 0 ? "+" : ""}${p}%</span>`; }
+function runName(n) { return n.replace(/^(\d{4})(\d\d)(\d\d)-(\d\d)(\d\d).*/, "$1-$2-$3 $4:$5"); }
+function renderBench(r) {
+  const sel = $("benchRuns");
+  if (!sel.options.length) sel.innerHTML = PRESET_ORDER.filter((k) => r.presets[k]).map((k) => `<option value="${k}">${esc(r.presets[k])}${k === "matrix" ? " · about an hour" : ""}</option>`).join("");
+  $("benchStart").disabled = r.running || !!(S && S.setup_running);
+  $("benchCancel").style.display = r.running ? "" : "none";
+  const rs = $("benchResume"), left = r.resumable ? r.resumable.left : 0;
+  rs.style.display = !r.running && left ? "" : "none";
+  rs.textContent = `Resume (${left} run${left === 1 ? "" : "s"} left)`;
+  const hs = $("benchHistory"), names = (r.history || []).map((h) => h.name);
+  if (hs.dataset.names !== names.join()) {
+    hs.dataset.names = names.join();
+    hs.innerHTML = (r.history || []).map((h) => `<option value="${esc(h.name)}">${esc(runName(h.name))} · ${h.runs} run${h.runs === 1 ? "" : "s"}</option>`).join("");
+  }
+  hs.style.display = names.length > 1 && !r.running ? "" : "none";
+  if (!benchShown && r.dir) hs.value = r.dir;
+  $("benchWhich").textContent = r.running ? `Running ${r.current || "…"} (${r.runs.indexOf(r.current) + 1} of ${r.runs.length}, ${r.workload} workload)` +
+      (r.waiting ? ` · waiting for the PC: ${r.waiting.join("; ")}` : "")
+    : (r.results.length ? `Results${r.dir ? " of " + runName(benchShown || r.dir) : ""}:` : "No results yet.");
+  const sizes = [...new Set(r.results.flatMap((x) => Object.keys(x.prefill || {})))].sort((a, b) => a - b);
+  const head = `<tr><th>Run</th><th>Answers (median)</th><th>Long document</th>${sizes.map((n) => `<th>Read ${n / 1024}K</th>`).join("")}` +
+    `<th>First token</th><th>Startup</th><th>VRAM</th><th>RAM cache</th><th>Experts from VRAM / RAM / NVMe</th></tr>`;
+  $("benchTable").innerHTML = r.results.length ? head + r.results.map((x) => {
+    if (x.error) return `<tr><td>${esc(x.label)}</td><td class="err" colspan="${8 + sizes.length}">${esc(x.error)}</td></tr>`;
+    const pv = x.previous || {}, pp = pv.prefill_pct || {};
+    const doc = x.document ? `${benchCell(x.document.tps)}${x.document.found ? "" : " · codes missed"}${benchDelta(pv.document_pct)}` : "-";
+    const tip = (x.stack ? `PyTorch ${x.stack.torch} · CUDA ${x.stack.cuda} · driver ${x.stack.driver} · commit ${x.stack.commit}` : "") +
+      (pv.date ? ` · % compared with ${pv.date}` : "");
+    return `<tr title="${esc(tip)}"><td>${esc(x.label)}</td><td>${benchCell(x.decode, " tok/s", 1)}${benchDelta(pv.decode_pct)}</td><td>${doc}</td>` +
+      sizes.map((n) => `<td>${benchCell((x.prefill || {})[n])}${benchDelta(pp[n])}</td>`).join("") +
+      `<td>${x.ttft == null ? "-" : x.ttft.toFixed(2) + " s"}</td><td>${x.startup_s == null ? "-" : Math.round(x.startup_s) + " s"}</td>` +
+      `<td>${x.model_vram_gb == null ? "-" : x.model_vram_gb.toFixed(1) + " GB"}</td><td>${x.ram_gib == null ? "-" : x.ram_gib + " GiB"}</td>` +
+      `<td>${esc(x.picks || "-")}</td></tr>`;
+  }).join("") : "";
+}
+async function pollBench() {
+  const r = await api(`bench?since=${benchSeq}${benchShown ? "&run=" + encodeURIComponent(benchShown) : ""}`);
+  if (!r || !r.presets) return false;
+  renderBench(r);
+  if (r.lines.length) {
+    const o = $("benchOut");
+    if (benchSeq === 0) o.textContent = "";
+    o.textContent += r.lines.map((l) => l[1]).join("\n") + "\n";
+    o.scrollTop = o.scrollHeight;
+  }
+  benchSeq = r.seq;
+  return r.running;
+}
+function alertMsg(m) { $("saveMsg").textContent = m || ""; }
+function showTab(name) { document.querySelector(`.tabs button[data-tab="${name}"]`).click(); }
+
+// ---- wiring
+document.querySelectorAll("[data-act]").forEach((b) => b.onclick = async () => { await api("action", { action: b.dataset.act }); poll(); });
+$("autoToggle").onchange = (e) => api("action", { action: e.target.checked ? "auto_on" : "auto_off" }).then(loadConfig);
+$("wakeToggle").onchange = (e) => api("action", { action: e.target.checked ? "wake_on" : "wake_off" }).then(loadConfig);
+$("autostartToggle").onchange = (e) => api("action", { action: e.target.checked ? "autostart_on" : "autostart_off" });
+$("saveBtn").onclick = saveSettings;
+$("checkBtn").onclick = () => { $("setupDetail").textContent = "checking…"; loadHardware(true).then(pollSetup); };
+$("quitBtn").onclick = async () => { if (confirm("Stop the model and quit the Repertory service?")) await api("action", { action: "quit" }); };
+$("quitKeepBtn").onclick = async () => { if (confirm("Quit the Repertory service but leave the model running? Clients can't reach it until the service starts again.")) await api("action", { action: "quit_keep_model" }); };
+$("benchStart").onclick = async () => {
+  const wl = $("benchWorkload").value;
+  if (!confirm(`Start the benchmark (${$("benchRuns").selectedOptions[0].text}, ${wl} workload)? The model stops while it runs, and clients get an error until it's done.`)) return;
+  benchShown = null; benchSeq = 0;
+  const r = await api("bench", { runs: [$("benchRuns").value], workload: wl });
+  $("benchMsg").textContent = r.message || ""; pollBench();
+};
+$("benchResume").onclick = async () => {
+  if (!confirm("Resume the benchmark? The model stops while it runs, and clients get an error until it's done.")) return;
+  benchShown = null; benchSeq = 0;
+  const r = await api("bench", { resume: true });
+  $("benchMsg").textContent = r.message || ""; pollBench();
+};
+$("benchCancel").onclick = async () => { const r = await api("bench/cancel", {}); $("benchMsg").textContent = r.message || ""; };
+$("benchHistory").onchange = (e) => { benchShown = e.target.value; pollBench(); };
+$("forgetBtn").onclick = async () => { const r = await api("action", { action: "forget_learned" }); alertMsg(r.ok ? "forgot learned limits" : r.message); };
+$("copyBtn").onclick = () => copyText($("endpoint").textContent, $("copyBtn"));
+document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
+  tab = b.dataset.tab;
+  document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("on", p.id === "p-" + tab));
+  if (tab === "setup") { pollSetup(); loadHardware(false); } if (tab === "logs") pollLogs(); if (tab === "bench") pollBench();
+});
+async function pollLogs() {
+  const r = await api("log");
+  for (const [id, txt] of [["logBackend", r.backend], ["logSwitcher", r.switcher]]) {
+    const el = $(id), stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+    el.textContent = txt || "(empty)"; if (stick) el.scrollTop = el.scrollHeight;
+  }
+}
+async function poll() {
+  try { S = await api("status"); renderStatus(); }
+  catch { $("banner").style.display = "block"; }
+}
+(async () => {
+  try { await loadConfig(); } catch { $("banner").style.display = "block"; }
+  await poll();
+  setInterval(poll, 1500);
+  window.addEventListener("resize", () => { if (S && S.history) renderChart(); });
+  setInterval(async () => { if (tab === "setup" || (S && S.setup_running)) { try { await pollSetup(); } catch {} } }, 1000);
+  setInterval(() => { if (tab === "logs") pollLogs().catch(() => {}); }, 3000);
+  setInterval(() => { if (tab === "bench") pollBench().catch(() => {}); }, 2000);
+})();
+</script>
+</body>
+</html>

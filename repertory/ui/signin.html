@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repertory</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #121212; color: #ececec;
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { width: min(440px, calc(100% - 32px)); }
+  h1 { font-size: 22px; margin: 0 0 8px; }
+  p { color: #a8a8a8; margin: 0 0 16px; }
+  code { color: #ececec; background: #1d1d1d; border: 1px solid #333; border-radius: 5px; padding: 1px 6px; }
+  form { display: flex; gap: 8px; }
+  input { flex: 1; min-width: 0; font: inherit; color: inherit; background: #1d1d1d; border: 1px solid #3a3a3a;
+    border-radius: 8px; padding: 9px 11px; }
+  button { font: inherit; color: inherit; background: #2b2b2b; border: 1px solid #474747; border-radius: 8px;
+    padding: 9px 16px; }
+  .err { color: #f28b82; margin-top: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Repertory</h1>
+  <p>The API is at <code id="api">/v1</code>.</p>
+  <p>To open the dashboard on this device, paste its private link. You'll find the link on the PC under
+    <b>Settings › Other devices</b>. This browser then remembers it.</p>
+  <p>On the PC itself, open Repertory with <code>Repertory.cmd</code> or <code>repertory open</code>.</p>
+  <form id="f"><input id="t" placeholder="Private link" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <button>Open</button></form>
+  <p class="err" id="e" hidden>That link doesn't work. It may have been replaced by a newer one.</p>
+</main>
+<script>
+  document.getElementById("api").textContent = location.origin + "/v1";
+  if (new URLSearchParams(location.search).has("token")) document.getElementById("e").hidden = false;
+  document.getElementById("f").onsubmit = (ev) => {
+    ev.preventDefault();
+    const v = document.getElementById("t").value.trim();
+    let tok = v;
+    try { tok = new URL(v).searchParams.get("token") || v; } catch { /* a bare token */ }
+    if (tok) location.href = "/?token=" + encodeURIComponent(tok);
+  };
+</script>
+</body>
+</html>

@@ -24,17 +24,23 @@ KEY0 = "model.language_model.layers.0.mlp"
 
 
 def manifest(bits=3, layers=3):
-    t = lambda k, n: [k // 16, n // 16, 16 * bits]
-    nb = lambda s: s[0] * s[1] * s[2] * 2
-    shapes = {"gate_proj.trellis": t(HID, INT), "up_proj.trellis": t(HID, INT), "down_proj.trellis": t(INT, HID)}
+    def shape(k, n):
+        return [k // 16, n // 16, 16 * bits]
+
+    def nbytes(s):
+        return s[0] * s[1] * s[2] * 2
+    shapes = {"gate_proj.trellis": shape(HID, INT), "up_proj.trellis": shape(HID, INT),
+              "down_proj.trellis": shape(INT, HID)}
     fields, off = [], 0
     for name, s in shapes.items():
-        fields.append({"name": name, "offset": off, "bytes": nb(s), "dtype": "I16", "shape": s}); off += nb(s)
+        fields.append({"name": name, "offset": off, "bytes": nbytes(s), "dtype": "I16", "shape": s})
+        off += nbytes(s)
     trellis = off
     rec = (trellis + 2304 + 4095) // 4096 * 4096
     keys = [f"model.language_model.layers.{i}.mlp" for i in range(layers - 1)] + ["mtp.layers.0.mlp"]
     return {"format": "glm53-expert-store-v1", "record_bytes": rec, "trellis_bytes": trellis, "align": 4096,
-            "experts_per_layer": E, "n_layers": layers, "layers": [{"li": i, "model_layer": 0, "key": k} for i, k in enumerate(keys)],
+            "experts_per_layer": E, "n_layers": layers,
+            "layers": [{"li": i, "model_layer": 0, "key": k} for i, k in enumerate(keys)],
             "mtp_layer_li": layers - 1, "fields": fields, "total_bytes": layers * E * rec,
             "vram_slot": {"off_u": fields[1]["offset"], "off_d": fields[2]["offset"], "slot_bytes": trellis}}
 
@@ -69,7 +75,8 @@ def exllamav3_stub():
     src = (ROOT / "exllamav3" / "exllamav3" / "model_init.py").read_text()
     fn = next(n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name == "add_args")
     ns = {"ArgumentParser": argparse.ArgumentParser, "SimpleNamespace": types.SimpleNamespace}
-    exec(compile(ast.Module(body=[fn], type_ignores=[]), "exllamav3/model_init.py:add_args", "exec"), ns)
+    # only add_args, taken from the repo's own exllamav3 source: the rest of model_init needs a GPU
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "exllamav3/model_init.py:add_args", "exec"), ns)  # noqa: S102
     mi = types.ModuleType("exllamav3.model_init")
     mi.add_args = ns["add_args"]
     pkg = types.ModuleType("exllamav3")

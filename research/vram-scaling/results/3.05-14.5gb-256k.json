@@ -1,0 +1,95 @@
+{
+ "label": "3.05-14.5gb-256k",
+ "quant": "3.05",
+ "usable_gb": 14.5,
+ "context": 262144,
+ "nostage": false,
+ "device_used_before_gb": 0.95,
+ "method": "engine cap (limit + guard)",
+ "plan": {
+  "quant": "3.05",
+  "context": 262144,
+  "kv_bits": 4,
+  "budget": 14500000000.0,
+  "fixed": 9598572288.0,
+  "reserve": 870000000.0,
+  "cache": 4010803200,
+  "slots": 2176,
+  "staging": true,
+  "chunk": 8192,
+  "ok": true,
+  "experimental": false,
+  "ram_for_all_experts": 41287680000,
+  "min_budget": 12289609088.0
+ },
+ "ram_gib": 38,
+ "startup_s": 57.7,
+ "model_vram_gb": 13.4,
+ "cold_first": {
+  "prompt_tokens": 74,
+  "completion_tokens": 600,
+  "ttft_s": 6.878444671630859,
+  "decode_tps": 31.854276013056104,
+  "wall_s": 25.682936906814575
+ },
+ "decode_tps_median": 37.78712009171858,
+ "decode_tps_min": 36.48061441736939,
+ "short_ttft_median_s": 1.6200857162475586,
+ "long": {
+  "prompt_tokens": 93938,
+  "completion_tokens": 79,
+  "ttft_s": 21.65438485145569,
+  "decode_tps": 25.913812236618796,
+  "wall_s": 24.71347999572754,
+  "prefill_tps": 4338.059041824277,
+  "needle_found": true
+ },
+ "decode_runs": [
+  {
+   "prompt_tokens": 71,
+   "completion_tokens": 700,
+   "ttft_s": 2.3506689071655273,
+   "decode_tps": 37.78712009171858,
+   "wall_s": 20.84911346435547
+  },
+  {
+   "prompt_tokens": 73,
+   "completion_tokens": 700,
+   "ttft_s": 1.9544470310211182,
+   "decode_tps": 36.48061441736939,
+   "wall_s": 21.115444660186768
+  },
+  {
+   "prompt_tokens": 69,
+   "completion_tokens": 700,
+   "ttft_s": 1.6200857162475586,
+   "decode_tps": 37.6783295941402,
+   "wall_s": 20.172004461288452
+  },
+  {
+   "prompt_tokens": 76,
+   "completion_tokens": 700,
+   "ttft_s": 1.3777649402618408,
+   "decode_tps": 38.16423328365905,
+   "wall_s": 19.693480253219604
+  },
+  {
+   "prompt_tokens": 67,
+   "completion_tokens": 700,
+   "ttft_s": 1.2272369861602783,
+   "decode_tps": 38.24933259458323,
+   "wall_s": 19.502174377441406
+  }
+ ],
+ "engine": {
+  "slots": 2400,
+  "arena_gb": 4.42,
+  "mem_peak_gb": 12.58,
+  "hit_rate": 0.0074,
+  "stage_overflow": 0,
+  "ram_slots": 22136,
+  "picks_vram_pct": 65.8,
+  "picks_ram_pct": 32.9,
+  "picks_nvme_pct": 1.3
+ }
+}

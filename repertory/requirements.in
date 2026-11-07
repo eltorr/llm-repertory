@@ -1,0 +1,3 @@
+# The manager's Python packages. repertory/requirements.txt pins them by hash; regenerate it with: bash tools/lock.sh
+psutil==7.2.2
+pywin32==312; sys_platform == "win32"

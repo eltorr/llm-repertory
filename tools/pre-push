@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Optional git hook: before every push, run tools/scan.sh (the checks GitHub runs) and refuse to push
+#  - local backup branches (backup/*);
+#  - commits whose message or changes match a pattern in .git/info/push-blocklist (one extended regex per line,
+#    such as a private hostname; that file stays local).
+# Install it with:  cp tools/pre-push .git/hooks/pre-push
+refs=$(cat)
+cd "$(git rev-parse --show-toplevel)" || exit 1
+blocklist=$(git rev-parse --git-path info/push-blocklist)
+zero=0000000000000000000000000000000000000000
+while read -r local_ref local_sha _remote_ref remote_sha; do
+  if [ -z "$local_ref" ] || [ "$local_sha" = "$zero" ]; then continue; fi
+  case "$local_ref" in
+    refs/heads/backup/*) echo "pre-push: $local_ref is a local backup branch; it is not pushed" >&2; exit 1 ;;
+  esac
+  if [ -s "$blocklist" ]; then
+    if [ "$remote_sha" = "$zero" ]; then range=("$local_sha" --not --remotes); else range=("$remote_sha..$local_sha"); fi
+    pattern=""   # one alternation: Git for Windows' grep 3.0 aborts on several -e patterns with -i
+    while IFS= read -r p; do
+      p=${p%$'\r'}
+      case "$p" in ''|'#'*) ;; *) pattern+="${pattern:+|}$p" ;; esac
+    done < "$blocklist"
+    if [ -n "$pattern" ] && git log -p "${range[@]}" | grep -q -i -E "$pattern"; then
+      echo "pre-push: an outgoing commit matches a pattern in $blocklist" >&2
+      exit 1
+    fi
+  fi
+done <<< "$refs"
+bash tools/scan.sh || { echo "pre-push: tools/scan.sh failed, so the push was stopped" >&2; exit 1; }

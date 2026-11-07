@@ -1,0 +1,41 @@
+# Weekly update proposals, one grouped pull request per ecosystem. Security fixes come as soon as an advisory appears.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /tools
+    schedule:
+      interval: weekly
+    groups:
+      scanners:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /repertory
+    schedule:
+      interval: weekly
+    groups:
+      manager:
+        patterns: ["*"]
+
+  # the engine: PyTorch and its CUDA libraries move together, by hand (bash tools/lock.sh), after testing on a GPU
+  - package-ecosystem: pip
+    directory: /setup
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "torch"
+      - dependency-name: "triton"
+      - dependency-name: "nvidia-*"
+      - dependency-name: "cuda-*"
+      - dependency-name: "setuptools"
+    groups:
+      engine:
+        patterns: ["*"]

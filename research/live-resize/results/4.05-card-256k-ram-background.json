@@ -1,0 +1,1187 @@
+{
+ "label": "4.05-card-256k",
+ "quant": "4.05",
+ "usable_gb": 29.03,
+ "context": 262144,
+ "nostage": false,
+ "mtp": 0,
+ "cpu_lane": null,
+ "prefetch": false,
+ "workload": "resize",
+ "protocol": "benchmark.py",
+ "date": "2026-11-07 05:05",
+ "device_used_before_gb": 1.96,
+ "card_total_gb": 34.19,
+ "method": "uncapped card",
+ "host": {
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "pcie": "5.0 x16",
+  "display": true,
+  "platform": "windows-wsl",
+  "ram_total_gb": 68.3
+ },
+ "stack": {
+  "torch": "2.15.0+cu132",
+  "cuda": "13.2",
+  "driver": "617.14",
+  "commit": "99a99b7"
+ },
+ "plan": {
+  "quant": "4.05",
+  "context": 262144,
+  "kv_bits": 4,
+  "budget": 29030109184.0,
+  "fixed": 9438572288.0,
+  "reserve": 1825361100.8,
+  "cache": 17694720000,
+  "slots": 7200,
+  "staging": true,
+  "chunk": 24576,
+  "ok": true,
+  "experimental": false,
+  "ram_for_all_experts": 42703257600,
+  "ram_target": 36663459840.0,
+  "min_budget": 13535234688.0
+ },
+ "ram_gib": 35,
+ "startup_s": 45.7,
+ "model_vram_gb": 27.23,
+ "resize": {
+  "phases": [
+   {
+    "at": "full",
+    "vram_used_gb": 29.47,
+    "engine": {
+     "slots": 7232,
+     "arena_gb": 17.77,
+     "mem_peak_gb": 26.44,
+     "hit_rate": 0.1889,
+     "stage_overflow": 0,
+     "ram_slots": 15291,
+     "picks_vram_pct": 93.3,
+     "picks_ram_pct": 4.9,
+     "picks_nvme_pct": 1.9
+    },
+    "text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+    "again_text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+    "answer": {
+     "prompt_tokens": 27,
+     "completion_tokens": 238,
+     "ttft_s": 0.337,
+     "prefill_tps": 80.0,
+     "decode_tps": 61.06,
+     "wall_s": 4.3
+    },
+    "again": {
+     "prompt_tokens": 27,
+     "completion_tokens": 238,
+     "ttft_s": 0.212,
+     "prefill_tps": 127.1,
+     "decode_tps": 66.74,
+     "wall_s": 3.8
+    },
+    "document": {
+     "prompt_tokens": 32747,
+     "completion_tokens": 38,
+     "ttft_s": 10.277,
+     "prefill_tps": 3186.5,
+     "decode_tps": 46.46,
+     "wall_s": 11.1
+    },
+    "verify": {
+     "vram_checked": 64,
+     "vram_bad": 0,
+     "ram_checked": 64,
+     "ram_bad": 0,
+     "table_bad": 0,
+     "rows_stale_nonvram": 230,
+     "home_bad_resident": 0,
+     "home_bad_nonresident": 0,
+     "ram_resident": 10621,
+     "vram_and_ram": 8,
+     "pinned": 0,
+     "dev_bad_rows": 0
+    },
+    "verify_ok": true
+   },
+   {
+    "at": "lean",
+    "vram_used_gb": 16.19,
+    "engine": {
+     "slots": 1824,
+     "arena_gb": 4.48,
+     "mem_peak_gb": 26.44,
+     "hit_rate": 0.0665,
+     "stage_overflow": 0,
+     "ram_slots": 15291,
+     "picks_vram_pct": 82.0,
+     "picks_ram_pct": 16.8,
+     "picks_nvme_pct": 1.3
+    },
+    "text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+    "again_text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+    "answer": {
+     "prompt_tokens": 27,
+     "completion_tokens": 238,
+     "ttft_s": 0.305,
+     "prefill_tps": 88.6,
+     "decode_tps": 37.12,
+     "wall_s": 6.7
+    },
+    "again": {
+     "prompt_tokens": 27,
+     "completion_tokens": 238,
+     "ttft_s": 0.317,
+     "prefill_tps": 85.0,
+     "decode_tps": 36.47,
+     "wall_s": 6.9
+    },
+    "document": {
+     "prompt_tokens": 32747,
+     "completion_tokens": 38,
+     "ttft_s": 15.673,
+     "prefill_tps": 2089.4,
+     "decode_tps": 29.87,
+     "wall_s": 17.0
+    },
+    "verify": {
+     "vram_checked": 64,
+     "vram_bad": 0,
+     "ram_checked": 64,
+     "ram_bad": 0,
+     "table_bad": 0,
+     "rows_stale_nonvram": 4993,
+     "home_bad_resident": 0,
+     "home_bad_nonresident": 0,
+     "ram_resident": 13928,
+     "vram_and_ram": 6,
+     "pinned": 0,
+     "dev_bad_rows": 0
+    },
+    "verify_ok": true
+   },
+   {
+    "at": "full again",
+    "vram_used_gb": 29.26,
+    "engine": {
+     "slots": 7136,
+     "arena_gb": 17.54,
+     "mem_peak_gb": 26.44,
+     "hit_rate": 0.0967,
+     "stage_overflow": 0,
+     "ram_slots": 15291,
+     "picks_vram_pct": 85.1,
+     "picks_ram_pct": 13.9,
+     "picks_nvme_pct": 0.9
+    },
+    "text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+    "again_text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+    "answer": {
+     "prompt_tokens": 27,
+     "completion_tokens": 238,
+     "ttft_s": 0.595,
+     "prefill_tps": 45.4,
+     "decode_tps": 65.16,
+     "wall_s": 4.3
+    },
+    "again": {
+     "prompt_tokens": 27,
+     "completion_tokens": 238,
+     "ttft_s": 0.224,
+     "prefill_tps": 120.7,
+     "decode_tps": 67.44,
+     "wall_s": 3.8
+    },
+    "document": {
+     "prompt_tokens": 32747,
+     "completion_tokens": 38,
+     "ttft_s": 7.872,
+     "prefill_tps": 4159.7,
+     "decode_tps": 57.81,
+     "wall_s": 8.5
+    },
+    "verify": {
+     "vram_checked": 64,
+     "vram_bad": 0,
+     "ram_checked": 64,
+     "ram_bad": 0,
+     "table_bad": 0,
+     "rows_stale_nonvram": 209,
+     "home_bad_resident": 0,
+     "home_bad_nonresident": 0,
+     "ram_resident": 10240,
+     "vram_and_ram": 5,
+     "pinned": 0,
+     "dev_bad_rows": 0
+    },
+    "verify_ok": true
+   },
+   {
+    "at": "full after cycles",
+    "vram_used_gb": 29.26,
+    "engine": {
+     "slots": 7136,
+     "arena_gb": 17.54,
+     "mem_peak_gb": 26.44,
+     "hit_rate": 0.1142,
+     "stage_overflow": 0,
+     "ram_slots": 15291,
+     "picks_vram_pct": 86.9,
+     "picks_ram_pct": 12.4,
+     "picks_nvme_pct": 0.7
+    },
+    "text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+    "again_text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+    "answer": {
+     "prompt_tokens": 27,
+     "completion_tokens": 238,
+     "ttft_s": 0.276,
+     "prefill_tps": 97.7,
+     "decode_tps": 66.09,
+     "wall_s": 3.9
+    },
+    "again": {
+     "prompt_tokens": 27,
+     "completion_tokens": 238,
+     "ttft_s": 0.231,
+     "prefill_tps": 116.8,
+     "decode_tps": 64.69,
+     "wall_s": 3.9
+    },
+    "document": {
+     "prompt_tokens": 32747,
+     "completion_tokens": 38,
+     "ttft_s": 7.675,
+     "prefill_tps": 4266.7,
+     "decode_tps": 56.79,
+     "wall_s": 8.3
+    },
+    "verify": {
+     "vram_checked": 64,
+     "vram_bad": 0,
+     "ram_checked": 64,
+     "ram_bad": 0,
+     "table_bad": 0,
+     "rows_stale_nonvram": 238,
+     "home_bad_resident": 0,
+     "home_bad_nonresident": 0,
+     "ram_resident": 10509,
+     "vram_and_ram": 5,
+     "pinned": 0,
+     "dev_bad_rows": 0
+    },
+    "verify_ok": true
+   },
+   {
+    "at": "lean with lean's RAM cache",
+    "vram_used_gb": 16.2,
+    "engine": {
+     "slots": 1824,
+     "arena_gb": 4.48,
+     "mem_peak_gb": 26.44,
+     "hit_rate": 0.0827,
+     "stage_overflow": 0,
+     "ram_slots": 3456,
+     "picks_vram_pct": 83.0,
+     "picks_ram_pct": 14.5,
+     "picks_nvme_pct": 2.6
+    },
+    "text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+    "again_text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+    "answer": {
+     "prompt_tokens": 27,
+     "completion_tokens": 238,
+     "ttft_s": 1.742,
+     "prefill_tps": 15.5,
+     "decode_tps": 22.87,
+     "wall_s": 12.2
+    },
+    "again": {
+     "prompt_tokens": 27,
+     "completion_tokens": 238,
+     "ttft_s": 1.643,
+     "prefill_tps": 16.4,
+     "decode_tps": 23.07,
+     "wall_s": 12.0
+    },
+    "document": {
+     "prompt_tokens": 32747,
+     "completion_tokens": 38,
+     "ttft_s": 33.695,
+     "prefill_tps": 971.9,
+     "decode_tps": 14.26,
+     "wall_s": 36.4
+    },
+    "verify": {
+     "vram_checked": 64,
+     "vram_bad": 0,
+     "ram_checked": 64,
+     "ram_bad": 0,
+     "table_bad": 0,
+     "rows_stale_nonvram": 12106,
+     "home_bad_resident": 0,
+     "home_bad_nonresident": 0,
+     "ram_resident": 3364,
+     "vram_and_ram": 4,
+     "pinned": 0,
+     "dev_bad_rows": 0
+    },
+    "verify_ok": true
+   },
+   {
+    "at": "full, RAM cache regrown",
+    "vram_used_gb": 29.26,
+    "engine": {
+     "slots": 7136,
+     "arena_gb": 17.54,
+     "mem_peak_gb": 26.44,
+     "hit_rate": 0.0962,
+     "stage_overflow": 0,
+     "ram_slots": 15291,
+     "picks_vram_pct": 85.2,
+     "picks_ram_pct": 12.4,
+     "picks_nvme_pct": 2.4
+    },
+    "text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+    "again_text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+    "answer": {
+     "prompt_tokens": 27,
+     "completion_tokens": 238,
+     "ttft_s": 0.321,
+     "prefill_tps": 84.0,
+     "decode_tps": 66.16,
+     "wall_s": 3.9
+    },
+    "again": {
+     "prompt_tokens": 27,
+     "completion_tokens": 238,
+     "ttft_s": 0.223,
+     "prefill_tps": 121.1,
+     "decode_tps": 66.45,
+     "wall_s": 3.8
+    },
+    "document": {
+     "prompt_tokens": 32747,
+     "completion_tokens": 38,
+     "ttft_s": 11.896,
+     "prefill_tps": 2752.7,
+     "decode_tps": 47.23,
+     "wall_s": 12.7
+    },
+    "verify": {
+     "vram_checked": 64,
+     "vram_bad": 0,
+     "ram_checked": 64,
+     "ram_bad": 0,
+     "table_bad": 0,
+     "rows_stale_nonvram": 213,
+     "home_bad_resident": 0,
+     "home_bad_nonresident": 0,
+     "ram_resident": 9448,
+     "vram_and_ram": 10,
+     "pinned": 0,
+     "dev_bad_rows": 0
+    },
+    "verify_ok": true
+   },
+   {
+    "at": "full after RAM cycles",
+    "vram_used_gb": 29.26,
+    "engine": {
+     "slots": 7136,
+     "arena_gb": 17.54,
+     "mem_peak_gb": 26.44,
+     "hit_rate": 0.106,
+     "stage_overflow": 0,
+     "ram_slots": 15291,
+     "picks_vram_pct": 86.2,
+     "picks_ram_pct": 11.6,
+     "picks_nvme_pct": 2.2
+    },
+    "text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+    "again_text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+    "answer": {
+     "prompt_tokens": 27,
+     "completion_tokens": 238,
+     "ttft_s": 1.62,
+     "prefill_tps": 16.7,
+     "decode_tps": 45.22,
+     "wall_s": 6.9
+    },
+    "again": {
+     "prompt_tokens": 27,
+     "completion_tokens": 238,
+     "ttft_s": 0.228,
+     "prefill_tps": 118.5,
+     "decode_tps": 66.71,
+     "wall_s": 3.8
+    },
+    "document": {
+     "prompt_tokens": 32747,
+     "completion_tokens": 38,
+     "ttft_s": 11.471,
+     "prefill_tps": 2854.8,
+     "decode_tps": 56.29,
+     "wall_s": 12.2
+    },
+    "verify": {
+     "vram_checked": 64,
+     "vram_bad": 0,
+     "ram_checked": 64,
+     "ram_bad": 0,
+     "table_bad": 0,
+     "rows_stale_nonvram": 219,
+     "home_bad_resident": 0,
+     "home_bad_nonresident": 0,
+     "ram_resident": 9376,
+     "vram_and_ram": 5,
+     "pinned": 0,
+     "dev_bad_rows": 0
+    },
+    "verify_ok": true
+   }
+  ],
+  "shifts": [
+   {
+    "to": "lean",
+    "request": {
+     "chunk": 8192,
+     "max_slots": 1920,
+     "reserve_bytes": 1825361100,
+     "elastic_bytes": 6442450944,
+     "vram_limit_bytes": 17928290304,
+     "torch_limit_bytes": 16500000000
+    },
+    "reply": {
+     "pools": [
+      {
+       "device": "cuda:0",
+       "slots_before": 7232,
+       "slots": 1824,
+       "arena_bytes": 4482662400,
+       "reserve_bytes": 1758252236,
+       "written_back": 5402,
+       "alloc_fail": false,
+       "ms": 515.2
+      }
+     ],
+     "chunk": 8192,
+     "vram_used_before": 29471473664,
+     "vram_used": 16192307200,
+     "ram": null,
+     "seconds": 0.52
+    },
+    "seconds": 0.5,
+    "vram_before_gb": 29.47,
+    "vram_after_gb": 16.19,
+    "ram_avail_before_gb": 10.65
+   },
+   {
+    "to": "full",
+    "request": {
+     "chunk": 24576,
+     "max_slots": null,
+     "reserve_bytes": 1825361100,
+     "elastic_bytes": 6442450944,
+     "vram_limit_bytes": 30990917632,
+     "torch_limit_bytes": 29567878400
+    },
+    "reply": {
+     "pools": [
+      {
+       "device": "cuda:0",
+       "slots_before": 1824,
+       "slots": 7136,
+       "arena_bytes": 17537433600,
+       "reserve_bytes": 1763495116,
+       "written_back": 0,
+       "alloc_fail": false,
+       "ms": 260.5
+      }
+     ],
+     "chunk": 24576,
+     "vram_used_before": 16191258624,
+     "vram_used": 29168435200,
+     "ram": null,
+     "seconds": 0.26
+    },
+    "seconds": 0.26,
+    "vram_before_gb": 16.19,
+    "vram_after_gb": 29.17,
+    "ram_avail_before_gb": 10.66
+   },
+   {
+    "to": "lean",
+    "request": {
+     "chunk": 8192,
+     "max_slots": 1920,
+     "reserve_bytes": 1825361100,
+     "elastic_bytes": 6442450944,
+     "vram_limit_bytes": 17922990080,
+     "torch_limit_bytes": 16500000000
+    },
+    "reply": {
+     "pools": [
+      {
+       "device": "cuda:0",
+       "slots_before": 7136,
+       "slots": 1824,
+       "arena_bytes": 4482662400,
+       "reserve_bytes": 1753009356,
+       "written_back": 5253,
+       "alloc_fail": false,
+       "ms": 515.1
+      }
+     ],
+     "chunk": 8192,
+     "vram_used_before": 29256515584,
+     "vram_used": 16187064320,
+     "ram": null,
+     "seconds": 0.52
+    },
+    "seconds": 0.5,
+    "vram_before_gb": 29.26,
+    "vram_after_gb": 16.19,
+    "ram_avail_before_gb": 10.17
+   },
+   {
+    "to": "full",
+    "request": {
+     "chunk": 24576,
+     "max_slots": null,
+     "reserve_bytes": 1825361100,
+     "elastic_bytes": 6442450944,
+     "vram_limit_bytes": 30990917632,
+     "torch_limit_bytes": 29562684672
+    },
+    "reply": {
+     "pools": [
+      {
+       "device": "cuda:0",
+       "slots_before": 1824,
+       "slots": 7136,
+       "arena_bytes": 17537433600,
+       "reserve_bytes": 1763495116,
+       "written_back": 0,
+       "alloc_fail": false,
+       "ms": 205.9
+      }
+     ],
+     "chunk": 24576,
+     "vram_used_before": 16192307200,
+     "vram_used": 29173678080,
+     "ram": null,
+     "seconds": 0.21
+    },
+    "seconds": 0.2,
+    "vram_before_gb": 16.19,
+    "vram_after_gb": 29.17,
+    "ram_avail_before_gb": 10.17
+   },
+   {
+    "to": "lean",
+    "request": {
+     "chunk": 8192,
+     "max_slots": 1920,
+     "reserve_bytes": 1825361100,
+     "elastic_bytes": 6442450944,
+     "vram_limit_bytes": 17922981888,
+     "torch_limit_bytes": 16500000000
+    },
+    "reply": {
+     "pools": [
+      {
+       "device": "cuda:0",
+       "slots_before": 7136,
+       "slots": 1824,
+       "arena_bytes": 4482662400,
+       "reserve_bytes": 1753009356,
+       "written_back": 0,
+       "alloc_fail": false,
+       "ms": 224.4
+      }
+     ],
+     "chunk": 8192,
+     "vram_used_before": 29168435200,
+     "vram_used": 16208035840,
+     "ram": null,
+     "seconds": 0.23
+    },
+    "seconds": 0.23,
+    "vram_before_gb": 29.17,
+    "vram_after_gb": 16.21,
+    "ram_avail_before_gb": 10.17
+   },
+   {
+    "to": "full",
+    "request": {
+     "chunk": 24576,
+     "max_slots": null,
+     "reserve_bytes": 1825361100,
+     "elastic_bytes": 6442450944,
+     "vram_limit_bytes": 30990917632,
+     "torch_limit_bytes": 29567935744
+    },
+    "reply": {
+     "pools": [
+      {
+       "device": "cuda:0",
+       "slots_before": 1824,
+       "slots": 7136,
+       "arena_bytes": 17537433600,
+       "reserve_bytes": 1763495116,
+       "written_back": 0,
+       "alloc_fail": false,
+       "ms": 253.9
+      }
+     ],
+     "chunk": 24576,
+     "vram_used_before": 16208035840,
+     "vram_used": 29168435200,
+     "ram": null,
+     "seconds": 0.25
+    },
+    "seconds": 0.26,
+    "vram_before_gb": 16.21,
+    "vram_after_gb": 29.17,
+    "ram_avail_before_gb": 10.65
+   },
+   {
+    "to": "lean",
+    "request": {
+     "chunk": 8192,
+     "max_slots": 1920,
+     "reserve_bytes": 1825361100,
+     "elastic_bytes": 6442450944,
+     "vram_limit_bytes": 17928232960,
+     "torch_limit_bytes": 16500000000
+    },
+    "reply": {
+     "pools": [
+      {
+       "device": "cuda:0",
+       "slots_before": 7136,
+       "slots": 1824,
+       "arena_bytes": 4482662400,
+       "reserve_bytes": 1753009356,
+       "written_back": 0,
+       "alloc_fail": false,
+       "ms": 190.7
+      }
+     ],
+     "chunk": 8192,
+     "vram_used_before": 29173678080,
+     "vram_used": 16213278720,
+     "ram": null,
+     "seconds": 0.19
+    },
+    "seconds": 0.18,
+    "vram_before_gb": 29.17,
+    "vram_after_gb": 16.21,
+    "ram_avail_before_gb": 10.65
+   },
+   {
+    "to": "full",
+    "request": {
+     "chunk": 24576,
+     "max_slots": null,
+     "reserve_bytes": 1825361100,
+     "elastic_bytes": 6442450944,
+     "vram_limit_bytes": 30990917632,
+     "torch_limit_bytes": 29567931648
+    },
+    "reply": {
+     "pools": [
+      {
+       "device": "cuda:0",
+       "slots_before": 1824,
+       "slots": 7136,
+       "arena_bytes": 17537433600,
+       "reserve_bytes": 1763495116,
+       "written_back": 0,
+       "alloc_fail": false,
+       "ms": 299.1
+      }
+     ],
+     "chunk": 24576,
+     "vram_used_before": 16208035840,
+     "vram_used": 29168435200,
+     "ram": null,
+     "seconds": 0.3
+    },
+    "seconds": 0.3,
+    "vram_before_gb": 16.21,
+    "vram_after_gb": 29.17,
+    "ram_avail_before_gb": 10.65
+   },
+   {
+    "to": "lean",
+    "request": {
+     "chunk": 8192,
+     "max_slots": 1920,
+     "reserve_bytes": 1825361100,
+     "elastic_bytes": 6442450944,
+     "vram_limit_bytes": 17922985984,
+     "torch_limit_bytes": 16500000000,
+     "ram_bytes": 8589934592
+    },
+    "reply": {
+     "pools": [
+      {
+       "device": "cuda:0",
+       "slots_before": 7136,
+       "slots": 1824,
+       "arena_bytes": 4482662400,
+       "reserve_bytes": 1753009356,
+       "written_back": 5210,
+       "alloc_fail": false,
+       "ms": 516.6
+      }
+     ],
+     "chunk": 8192,
+     "vram_used_before": 29256515584,
+     "vram_used": 16187064320,
+     "ram": {
+      "ram_slots_before": 15291,
+      "ram_slots": 3456,
+      "ram_bytes_before": 37579161600,
+      "ram_bytes": 8493465600,
+      "dropped": 11835,
+      "moved": 2806,
+      "ms": 374.9,
+      "growing": false,
+      "freeing": true,
+      "target_slots": 15291,
+      "stopped": null,
+      "target_bytes": 37579161600,
+      "limit_bytes": 56482058496
+     },
+     "seconds": 0.89
+    },
+    "seconds": 0.84,
+    "vram_before_gb": 29.26,
+    "vram_after_gb": 16.19,
+    "ram_avail_before_gb": 10.17,
+    "ram_timeline": [
+     {
+      "s": 0,
+      "ram_avail_gb": 10.74,
+      "gained_gb": 0.57
+     },
+     {
+      "s": 5,
+      "ram_avail_gb": 10.78,
+      "gained_gb": 0.61
+     },
+     {
+      "s": 15,
+      "ram_avail_gb": 10.28,
+      "gained_gb": 0.11
+     },
+     {
+      "s": 30,
+      "ram_avail_gb": 9.73,
+      "gained_gb": -0.44
+     },
+     {
+      "s": 60,
+      "ram_avail_gb": 40.05,
+      "gained_gb": 29.88
+     }
+    ]
+   },
+   {
+    "to": "full",
+    "request": {
+     "chunk": 24576,
+     "max_slots": null,
+     "reserve_bytes": 1825361100,
+     "elastic_bytes": 6442450944,
+     "vram_limit_bytes": 30990917632,
+     "torch_limit_bytes": 29567870208,
+     "ram_bytes": 37580963840
+    },
+    "reply": {
+     "pools": [
+      {
+       "device": "cuda:0",
+       "slots_before": 1824,
+       "slots": 7136,
+       "arena_bytes": 17537433600,
+       "reserve_bytes": 1763495116,
+       "written_back": 0,
+       "alloc_fail": false,
+       "ms": 256.7
+      }
+     ],
+     "chunk": 24576,
+     "vram_used_before": 16191258624,
+     "vram_used": 29168435200,
+     "ram": {
+      "ram_slots_before": 3456,
+      "ram_bytes_before": 8493465600,
+      "dropped": 0,
+      "moved": 0,
+      "ms": 0.0,
+      "growing": true,
+      "freeing": false,
+      "target_slots": 15291,
+      "stopped": null,
+      "free_s": 2.98,
+      "ram_slots": 3456,
+      "ram_bytes": 8493465600,
+      "target_bytes": 37579161600,
+      "limit_bytes": 56482058496
+     },
+     "seconds": 0.26
+    },
+    "seconds": 0.25,
+    "vram_before_gb": 16.19,
+    "vram_after_gb": 29.17,
+    "ram_avail_before_gb": 39.95,
+    "ram_after": {
+     "growing": false,
+     "freeing": false,
+     "target_slots": 15291,
+     "stopped": null,
+     "free_s": 2.98,
+     "grow_s": 27.59,
+     "grow_busy_steps": 8,
+     "ram_slots": 15291,
+     "ram_bytes": 37579161600,
+     "target_bytes": 37579161600,
+     "limit_bytes": 56482058496,
+     "waited_s": 16.61
+    }
+   },
+   {
+    "to": "lean",
+    "request": {
+     "chunk": 8192,
+     "max_slots": 1920,
+     "reserve_bytes": 1825361100,
+     "elastic_bytes": 6442450944,
+     "vram_limit_bytes": 17923047424,
+     "torch_limit_bytes": 16500000000,
+     "ram_bytes": 8589934592
+    },
+    "reply": {
+     "pools": [
+      {
+       "device": "cuda:0",
+       "slots_before": 7136,
+       "slots": 1824,
+       "arena_bytes": 4482662400,
+       "reserve_bytes": 1753009356,
+       "written_back": 5305,
+       "alloc_fail": false,
+       "ms": 475.8
+      }
+     ],
+     "chunk": 8192,
+     "vram_used_before": 29256515584,
+     "vram_used": 16187064320,
+     "ram": {
+      "ram_slots_before": 15291,
+      "ram_slots": 3456,
+      "ram_bytes_before": 37579161600,
+      "ram_bytes": 8493465600,
+      "dropped": 11297,
+      "moved": 3212,
+      "ms": 433.8,
+      "growing": false,
+      "freeing": true,
+      "target_slots": 15291,
+      "stopped": null,
+      "free_s": 2.98,
+      "grow_s": 27.59,
+      "grow_busy_steps": 8,
+      "target_bytes": 37579161600,
+      "limit_bytes": 56482058496
+     },
+     "seconds": 0.91
+    },
+    "seconds": 0.86,
+    "vram_before_gb": 29.26,
+    "vram_after_gb": 16.19,
+    "ram_avail_before_gb": 10.33
+   },
+   {
+    "to": "full",
+    "request": {
+     "chunk": 24576,
+     "max_slots": null,
+     "reserve_bytes": 1825361100,
+     "elastic_bytes": 6442450944,
+     "vram_limit_bytes": 30990917632,
+     "torch_limit_bytes": 29567866112,
+     "ram_bytes": 37580963840
+    },
+    "reply": {
+     "pools": [
+      {
+       "device": "cuda:0",
+       "slots_before": 1824,
+       "slots": 7136,
+       "arena_bytes": 17537433600,
+       "reserve_bytes": 1763495116,
+       "written_back": 0,
+       "alloc_fail": false,
+       "ms": 247.1
+      }
+     ],
+     "chunk": 24576,
+     "vram_used_before": 16187064320,
+     "vram_used": 29168435200,
+     "ram": {
+      "ram_slots_before": 3456,
+      "ram_bytes_before": 8493465600,
+      "dropped": 0,
+      "moved": 0,
+      "ms": 0.0,
+      "growing": true,
+      "freeing": false,
+      "target_slots": 15291,
+      "stopped": null,
+      "free_s": 3.12,
+      "grow_s": 27.59,
+      "grow_busy_steps": 8,
+      "ram_slots": 3456,
+      "ram_bytes": 8493465600,
+      "target_bytes": 37579161600,
+      "limit_bytes": 56482058496
+     },
+     "seconds": 0.25
+    },
+    "seconds": 0.24,
+    "vram_before_gb": 16.19,
+    "vram_after_gb": 29.17,
+    "ram_avail_before_gb": 10.7,
+    "ram_after": {
+     "growing": false,
+     "freeing": false,
+     "target_slots": 15291,
+     "stopped": null,
+     "free_s": 3.12,
+     "grow_s": 10.4,
+     "grow_busy_steps": 0,
+     "ram_slots": 15291,
+     "ram_bytes": 37579161600,
+     "target_bytes": 37579161600,
+     "limit_bytes": 56482058496,
+     "waited_s": 8.81
+    }
+   },
+   {
+    "to": "lean",
+    "request": {
+     "chunk": 8192,
+     "max_slots": 1920,
+     "reserve_bytes": 1825361100,
+     "elastic_bytes": 6442450944,
+     "vram_limit_bytes": 17923043328,
+     "torch_limit_bytes": 16500000000,
+     "ram_bytes": 8589934592
+    },
+    "reply": {
+     "pools": [
+      {
+       "device": "cuda:0",
+       "slots_before": 7136,
+       "slots": 1824,
+       "arena_bytes": 4482662400,
+       "reserve_bytes": 1753009356,
+       "written_back": 0,
+       "alloc_fail": false,
+       "ms": 282.7
+      }
+     ],
+     "chunk": 8192,
+     "vram_used_before": 29168435200,
+     "vram_used": 16208035840,
+     "ram": {
+      "ram_slots_before": 15291,
+      "ram_slots": 3456,
+      "ram_bytes_before": 37579161600,
+      "ram_bytes": 8493465600,
+      "dropped": 0,
+      "moved": 0,
+      "ms": 1.9,
+      "growing": false,
+      "freeing": true,
+      "target_slots": 15291,
+      "stopped": null,
+      "free_s": 3.12,
+      "grow_s": 10.4,
+      "grow_busy_steps": 0,
+      "target_bytes": 37579161600,
+      "limit_bytes": 56482058496
+     },
+     "seconds": 0.29
+    },
+    "seconds": 0.28,
+    "vram_before_gb": 29.17,
+    "vram_after_gb": 16.21,
+    "ram_avail_before_gb": 7.71
+   },
+   {
+    "to": "full",
+    "request": {
+     "chunk": 24576,
+     "max_slots": null,
+     "reserve_bytes": 1825361100,
+     "elastic_bytes": 6442450944,
+     "vram_limit_bytes": 30990917632,
+     "torch_limit_bytes": 29567870208,
+     "ram_bytes": 37580963840
+    },
+    "reply": {
+     "pools": [
+      {
+       "device": "cuda:0",
+       "slots_before": 1824,
+       "slots": 7136,
+       "arena_bytes": 17537433600,
+       "reserve_bytes": 1763495116,
+       "written_back": 0,
+       "alloc_fail": false,
+       "ms": 380.8
+      }
+     ],
+     "chunk": 24576,
+     "vram_used_before": 16208035840,
+     "vram_used": 29168435200,
+     "ram": {
+      "ram_slots_before": 3456,
+      "ram_bytes_before": 8493465600,
+      "dropped": 0,
+      "moved": 0,
+      "ms": 0.0,
+      "growing": true,
+      "freeing": false,
+      "target_slots": 15291,
+      "stopped": null,
+      "free_s": 3.15,
+      "grow_s": 10.4,
+      "grow_busy_steps": 0,
+      "ram_slots": 3456,
+      "ram_bytes": 8493465600,
+      "target_bytes": 37579161600,
+      "limit_bytes": 56482058496
+     },
+     "seconds": 0.38
+    },
+    "seconds": 0.38,
+    "vram_before_gb": 16.21,
+    "vram_after_gb": 29.17,
+    "ram_avail_before_gb": 10.59,
+    "ram_after": {
+     "growing": false,
+     "freeing": false,
+     "target_slots": 15291,
+     "stopped": null,
+     "free_s": 3.15,
+     "grow_s": 8.96,
+     "grow_busy_steps": 0,
+     "ram_slots": 15291,
+     "ram_bytes": 37579161600,
+     "target_bytes": 37579161600,
+     "limit_bytes": 56482058496,
+     "waited_s": 7.23
+    }
+   }
+  ],
+  "ram": {
+   "during_growth": [
+    {
+     "prompt_tokens": 27,
+     "completion_tokens": 238,
+     "ttft_s": 1.619,
+     "prefill_tps": 16.7,
+     "decode_tps": 36.28,
+     "wall_s": 8.2,
+     "text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+     "growing_after": true
+    }
+   ],
+   "checks": {
+    "ram_shrunk_gib": 27.09,
+    "ram_windows_gained_gb": 29.88,
+    "ram_slots_regrown": true,
+    "ram_held_s_max": 0.86,
+    "ram_grow_s_max": 27.59,
+    "ram_ttft_while_growing_s_max": 1.619
+   }
+  },
+  "checks": {
+   "deterministic": true,
+   "same_answers": true,
+   "caches_consistent": true,
+   "vram_freed_gb": 13.28,
+   "regrown_vs_first_gb": [
+    -0.3,
+    -0.3,
+    -0.3,
+    -0.3,
+    -0.3,
+    -0.3,
+    -0.3
+   ],
+   "seconds_max": 0.5,
+   "ram_shrunk_gib": 27.09,
+   "ram_windows_gained_gb": 29.88,
+   "ram_slots_regrown": true,
+   "ram_held_s_max": 0.86,
+   "ram_grow_s_max": 27.59,
+   "ram_ttft_while_growing_s_max": 1.619
+  }
+ },
+ "decode_runs": [
+  {
+   "prompt_tokens": 27,
+   "completion_tokens": 238,
+   "ttft_s": 0.337,
+   "prefill_tps": 80.0,
+   "decode_tps": 61.06,
+   "wall_s": 4.3
+  }
+ ],
+ "decode_tps_median": 61.06,
+ "decode_tps_min": 61.06,
+ "short_ttft_median_s": 0.337,
+ "prefill": {
+  "32768": {
+   "median": 3186.5,
+   "runs": [
+    3186.5
+   ]
+  }
+ },
+ "engine": {
+  "slots": 7136,
+  "arena_gb": 17.54,
+  "mem_peak_gb": 26.44,
+  "hit_rate": 0.106,
+  "stage_overflow": 0,
+  "ram_slots": 15291,
+  "picks_vram_pct": 86.2,
+  "picks_ram_pct": 11.6,
+  "picks_nvme_pct": 2.2
+ },
+ "previous": {
+  "run": "20261107-010638",
+  "date": "2026-11-07 01:06",
+  "stack": {
+   "torch": "2.15.0+cu132",
+   "cuda": "13.2",
+   "driver": "617.14",
+   "commit": "5d361ab"
+  },
+  "decode_pct": 1.8,
+  "document_pct": null,
+  "prefill_pct": {
+   "32768": -0.7
+  }
+ },
+ "finished": true
+}

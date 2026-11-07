@@ -1,0 +1,584 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/eltorr/repertory/blob/main/catalog/schema.json",
+  "title": "Engine and model catalog",
+  "description": "What the manager can install and run: engines fetched from a git repo at a pinned commit, models fetched from Hugging Face at a pinned revision, and how to prepare, serve and steer each pair. Draft 1.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "engines",
+    "models"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "engines": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/engine"
+      }
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/model"
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "argv": {
+      "description": "A command as a list of arguments; {placeholders} are filled by the manager (see serve.placeholders).",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "license": {
+      "type": "object",
+      "required": [
+        "spdx"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "spdx": {
+          "type": "string",
+          "description": "SPDX id, or NOASSERTION when part of it has no license"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "step": {
+      "description": "One install step. Steps run in order; a step whose 'creates' path exists is skipped.",
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "run"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "type": "string"
+        },
+        "run": {
+          "$ref": "#/$defs/argv"
+        },
+        "creates": {
+          "type": "string",
+          "description": "Path (relative to the engine folder) that exists once the step has run"
+        },
+        "needs_root": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "knob": {
+      "description": "One placement control the manager can turn. 'live' knobs change while the model serves; the others need a restart.",
+      "type": "object",
+      "required": [
+        "unit",
+        "live"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "env": {
+          "type": "string"
+        },
+        "arg": {
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "HTTP route that changes it while serving, e.g. POST /v1/vram"
+        },
+        "unit": {
+          "enum": [
+            "bytes",
+            "GiB",
+            "bool",
+            "count",
+            "fraction",
+            "cpu-list"
+          ]
+        },
+        "live": {
+          "type": "boolean"
+        },
+        "default": {},
+        "note": {
+          "type": "string"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "env"
+          ]
+        },
+        {
+          "required": [
+            "arg"
+          ]
+        },
+        {
+          "required": [
+            "endpoint"
+          ]
+        }
+      ]
+    },
+    "engine": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "license",
+        "source",
+        "requires",
+        "build",
+        "serve",
+        "placement"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "license": {
+          "$ref": "#/$defs/license"
+        },
+        "source": {
+          "description": "Where the engine comes from: a git repo at a pinned commit, or this repository itself (self), with its adapter in subdir.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "git",
+                "revision"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "git": {
+                  "type": "string",
+                  "pattern": "^https://"
+                },
+                "revision": {
+                  "$ref": "#/$defs/sha"
+                },
+                "subdir": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "self",
+                "subdir"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "self": {
+                  "const": true
+                },
+                "subdir": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        },
+        "requires": {
+          "type": "object",
+          "required": [
+            "platforms",
+            "gpu"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "platforms": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "linux-x86_64",
+                  "windows-wsl2",
+                  "windows-x64",
+                  "macos-arm64"
+                ]
+              }
+            },
+            "gpu": {
+              "type": "object",
+              "required": [
+                "vendor"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "vendor": {
+                  "enum": [
+                    "nvidia",
+                    "amd",
+                    "intel",
+                    "apple"
+                  ]
+                },
+                "min_compute_capability": {
+                  "type": "string",
+                  "pattern": "^[0-9]+\\.[0-9]+$"
+                },
+                "min_driver": {
+                  "type": "string"
+                },
+                "min_vram_gb": {
+                  "type": "number"
+                }
+              }
+            },
+            "cuda_toolkit": {
+              "type": "string"
+            },
+            "python": {
+              "type": "string",
+              "description": "PEP 440 specifier, e.g. >=3.11,<3.13"
+            },
+            "torch": {
+              "type": "string"
+            },
+            "lock": {
+              "type": "object",
+              "required": [
+                "path",
+                "sha256"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              }
+            }
+          }
+        },
+        "build": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          }
+        },
+        "serve": {
+          "type": "object",
+          "required": [
+            "command",
+            "health",
+            "apis",
+            "placeholders"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "command": {
+              "$ref": "#/$defs/argv"
+            },
+            "env": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "placeholders": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Every {name} the command and env use"
+            },
+            "health": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "ready_line": {
+              "type": "string",
+              "description": "Log line that means the model has loaded"
+            },
+            "apis": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "openai-chat",
+                  "openai-responses",
+                  "openai-completions",
+                  "anthropic-messages"
+                ]
+              }
+            },
+            "unload": {
+              "type": "string",
+              "description": "HTTP route that frees the model while the server stays up, if any"
+            }
+          }
+        },
+        "placement": {
+          "description": "Where experts can live and what moves them: the inputs for sizing and for shifting between tiers.",
+          "type": "object",
+          "required": [
+            "tiers",
+            "knobs"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "tiers": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "vram",
+                  "ram",
+                  "cpu-compute",
+                  "nvme",
+                  "page-cache"
+                ]
+              }
+            },
+            "knobs": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/knob"
+              }
+            }
+          }
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "id",
+        "family",
+        "label",
+        "source",
+        "format",
+        "bpw",
+        "engines",
+        "facts",
+        "disk",
+        "paths",
+        "prepare",
+        "cpu_execution"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "family": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "license": {
+          "$ref": "#/$defs/license"
+        },
+        "source": {
+          "type": "object",
+          "required": [
+            "huggingface",
+            "revision"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "huggingface": {
+              "type": "string",
+              "pattern": "^[\\w.-]+/[\\w.-]+$"
+            },
+            "branch": {
+              "type": "string"
+            },
+            "revision": {
+              "$ref": "#/$defs/sha"
+            },
+            "verify": {
+              "enum": [
+                "hub-hashes"
+              ],
+              "default": "hub-hashes"
+            }
+          }
+        },
+        "format": {
+          "enum": [
+            "exl3",
+            "gguf",
+            "safetensors"
+          ]
+        },
+        "bpw": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "engines": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "facts": {
+          "description": "What sizing needs: the expert layout and the VRAM that isn't experts.",
+          "type": "object",
+          "required": [
+            "experts_per_layer",
+            "moe_layers",
+            "experts_per_token",
+            "expert_bytes",
+            "fixed_vram_bytes"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "experts_per_layer": {
+              "type": "integer"
+            },
+            "moe_layers": {
+              "type": "integer"
+            },
+            "experts_per_token": {
+              "type": "integer"
+            },
+            "expert_bytes": {
+              "type": "integer",
+              "description": "One expert as the VRAM cache holds it"
+            },
+            "store_record_bytes": {
+              "type": "integer",
+              "description": "One expert record in the NVMe store"
+            },
+            "fixed_vram_bytes": {
+              "type": "integer",
+              "description": "Non-expert VRAM at zero context"
+            },
+            "kv_bytes_per_token": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "description": "By KV bits"
+            },
+            "max_context": {
+              "type": "integer"
+            },
+            "mtp": {
+              "type": "boolean",
+              "description": "The model has an MTP draft layer"
+            }
+          }
+        },
+        "disk": {
+          "type": "object",
+          "required": [
+            "download_gb",
+            "prepared_gb"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "download_gb": {
+              "type": "number"
+            },
+            "prepared_gb": {
+              "type": "number"
+            }
+          }
+        },
+        "paths": {
+          "type": "object",
+          "required": [
+            "model_dir"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "model_dir": {
+              "type": "string"
+            },
+            "store": {
+              "type": "string"
+            }
+          }
+        },
+        "prepare": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          }
+        },
+        "measured": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "date",
+              "machine",
+              "decode_tps",
+              "report"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "date": {
+                "type": "string",
+                "format": "date"
+              },
+              "machine": {
+                "type": "string"
+              },
+              "engine": {
+                "$ref": "#/$defs/id"
+              },
+              "decode_tps": {
+                "type": "number"
+              },
+              "prefill_tps": {
+                "type": "number"
+              },
+              "report": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "cpu_execution": {
+          "enum": [
+            "none",
+            "experimental",
+            "validated"
+          ],
+          "description": "Whether the engine's CPU lane can compute this quant's experts: 'none' when no kernel decodes its format, 'experimental' when one exists but is not gated or validated for it"
+        }
+      }
+    }
+  }
+}

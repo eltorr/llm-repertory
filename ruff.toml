@@ -1,0 +1,19 @@
+# Lints Repertory's own Python (tools/scan.sh and the Checks workflow). The bundled engine (exllamav3 and
+# glm53-flash-offload) keeps its own style.
+line-length = 120
+include = [
+    "repertory/**/*.py",
+    "engines/**/*.py",
+    "tests/*.py",
+    "bin/repertory-timestamp",
+]
+
+[lint]
+# pyflakes and pycodestyle errors, likely bugs (bugbear), and the security checks that matter here: exec/eval, pickle,
+# unsafe YAML, shell=True, hard-coded /tmp paths
+select = ["E", "F", "W", "B", "S102", "S108", "S301", "S307", "S506", "S602", "S604", "S605"]
+
+[lint.per-file-ignores]
+# the live-resize code and LocalOnly keep their compact style
+"engines/exl3_offload/server.py" = ["E701", "E702"]
+"tests/*" = ["S108"]                            # attack strings, not temp files

@@ -1,0 +1,130 @@
+{
+ "label": "3.05-10.5gb-128k-nostage-ram38",
+ "quant": "3.05",
+ "usable_gb": 10.5,
+ "context": 131072,
+ "nostage": true,
+ "workload": "standard",
+ "protocol": "benchmark.py",
+ "date": "2026-11-05 23:05",
+ "device_used_before_gb": 2.24,
+ "card_total_gb": 34.19,
+ "method": "engine cap (limit + guard)",
+ "host": {
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "pcie": "5.0 x16",
+  "display": true,
+  "platform": "windows-wsl",
+  "ram_total_gb": 68.3
+ },
+ "stack": {
+  "torch": "2.15.0+cu132",
+  "cuda": "13.2",
+  "driver": "617.14",
+  "commit": "e70fbe6"
+ },
+ "plan": {
+  "quant": "3.05",
+  "context": 131072,
+  "kv_bits": 4,
+  "budget": 10500000000.0,
+  "fixed": 7559286144.0,
+  "reserve": 822560000.0,
+  "cache": 2064384000,
+  "slots": 1120,
+  "staging": false,
+  "chunk": 1536,
+  "ok": true,
+  "experimental": true,
+  "ram_for_all_experts": 43234099200,
+  "min_budget": 11026802944.0
+ },
+ "ram_gib": 38,
+ "startup_s": 53.4,
+ "model_vram_gb": 9.49,
+ "decode_runs": [
+  {
+   "prompt_tokens": 27,
+   "completion_tokens": 208,
+   "ttft_s": 0.357,
+   "decode_tps": 34.07,
+   "wall_s": 6.5,
+   "prefill_tps": 75.6
+  },
+  {
+   "prompt_tokens": 27,
+   "completion_tokens": 214,
+   "ttft_s": 0.274,
+   "decode_tps": 34.38,
+   "wall_s": 6.5,
+   "prefill_tps": 98.5
+  },
+  {
+   "prompt_tokens": 27,
+   "completion_tokens": 220,
+   "ttft_s": 0.254,
+   "decode_tps": 34.54,
+   "wall_s": 6.6,
+   "prefill_tps": 106.3
+  }
+ ],
+ "prefill": {
+  "1024": {
+   "median": 831.0,
+   "runs": [
+    362.6,
+    831.0,
+    872.0
+   ]
+  },
+  "8192": {
+   "median": 1697.0,
+   "runs": [
+    1523.1,
+    1697.0,
+    1724.2
+   ]
+  },
+  "32768": {
+   "median": 1927.5,
+   "runs": [
+    1891.1,
+    1927.5,
+    1944.8
+   ]
+  },
+  "65536": {
+   "median": 1962.6,
+   "runs": [
+    1956.3,
+    1962.6,
+    1970.0
+   ]
+  }
+ },
+ "decode_tps_median": 34.38,
+ "decode_tps_min": 34.07,
+ "short_ttft_median_s": 0.274,
+ "long": {
+  "prompt_tokens": 100012,
+  "completion_tokens": 23,
+  "ttft_s": 51.731,
+  "decode_tps": 34.21,
+  "wall_s": 52.4,
+  "prefill_tps": 1933.3,
+  "codes_found": true
+ },
+ "engine": {
+  "slots": 1120,
+  "arena_gb": 2.06,
+  "mem_peak_gb": 9.17,
+  "hit_rate": 0.0,
+  "stage_overflow": null,
+  "ram_slots": 22136,
+  "picks_vram_pct": 53.0,
+  "picks_ram_pct": 45.6,
+  "picks_nvme_pct": 1.4
+ },
+ "previous": null,
+ "finished": true
+}

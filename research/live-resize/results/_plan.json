@@ -1,0 +1,18 @@
+{
+ "workload": "resize",
+ "protocol": "benchmark.py",
+ "runs": [
+  {
+   "quant": "4.05",
+   "vram_gb": null,
+   "context": 262144,
+   "nostage": false,
+   "ram": null,
+   "mtp": 0,
+   "cpu": null,
+   "prefetch": false,
+   "label": "4.05-card-256k",
+   "spec": "4.05:card:262144"
+  }
+ ]
+}

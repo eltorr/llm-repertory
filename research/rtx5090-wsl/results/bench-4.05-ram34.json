@@ -1,0 +1,92 @@
+{
+ "label": "4.05-ram34",
+ "startup_s": 58.409911799,
+ "cold_first": {
+  "prompt_tokens": 74,
+  "completion_tokens": 600,
+  "ttft_s": 9.13752794265747,
+  "decode_tps": 34.84315162542741,
+  "wall_s": 26.32901096343994
+ },
+ "decode_runs": [
+  {
+   "prompt_tokens": 74,
+   "completion_tokens": 700,
+   "ttft_s": 1.7577564716339111,
+   "decode_tps": 59.74392916621207,
+   "wall_s": 13.457807064056396
+  },
+  {
+   "prompt_tokens": 71,
+   "completion_tokens": 700,
+   "ttft_s": 1.61539888381958,
+   "decode_tps": 53.07680399347658,
+   "wall_s": 14.785107135772705
+  },
+  {
+   "prompt_tokens": 73,
+   "completion_tokens": 700,
+   "ttft_s": 1.510054111480713,
+   "decode_tps": 56.73522802926287,
+   "wall_s": 13.830513000488281
+  },
+  {
+   "prompt_tokens": 69,
+   "completion_tokens": 700,
+   "ttft_s": 1.47635817527771,
+   "decode_tps": 57.100487849872664,
+   "wall_s": 13.718049764633179
+  },
+  {
+   "prompt_tokens": 76,
+   "completion_tokens": 700,
+   "ttft_s": 1.4766266345977783,
+   "decode_tps": 56.06383810025294,
+   "wall_s": 13.944665431976318
+  },
+  {
+   "prompt_tokens": 95,
+   "completion_tokens": 360,
+   "ttft_s": 1.4801037311553955,
+   "decode_tps": 44.96653467967392,
+   "wall_s": 9.483733177185059
+  },
+  {
+   "prompt_tokens": 67,
+   "completion_tokens": 700,
+   "ttft_s": 1.466700553894043,
+   "decode_tps": 54.79180536701018,
+   "wall_s": 14.224189043045044
+  },
+  {
+   "prompt_tokens": 71,
+   "completion_tokens": 700,
+   "ttft_s": 1.4852380752563477,
+   "decode_tps": 56.44144454611079,
+   "wall_s": 13.86987018585205
+  }
+ ],
+ "decode_tps_median": 56.25264132318186,
+ "decode_tps_min": 44.96653467967392,
+ "decode_tps_max": 59.74392916621207,
+ "short_ttft_median_s": 1.4826709032058716,
+ "long_cold": {
+  "prompt_tokens": 94466,
+  "completion_tokens": 138,
+  "ttft_s": 16.481428146362305,
+  "decode_tps": 42.08721482327527,
+  "wall_s": 19.775599002838135,
+  "prefill_tps": 5731.663491846733,
+  "needle_found": true
+ },
+ "long_cached": {
+  "prompt_tokens": 94466,
+  "completion_tokens": 107,
+  "ttft_s": 0.14522027969360352,
+  "decode_tps": 42.882874839875086,
+  "wall_s": 2.6486384868621826,
+  "prefill_tps": 650501.4327152609,
+  "needle_found": true
+ },
+ "vram_peak_mib": 29416
+}

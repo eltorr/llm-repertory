@@ -1,0 +1,26 @@
+{
+ "label": "3.05-7gb-16k",
+ "quant": "3.05",
+ "usable_gb_target": 7.0,
+ "context": 16384,
+ "ballast_gb": 25.8,
+ "free_at_start_gb": 6.87,
+ "plan": {
+  "quant": "3.05",
+  "context": 16384,
+  "kv_bits": 4,
+  "budget": 6670269952.0,
+  "fixed": 6956160768.0,
+  "reserve": 700000000.0,
+  "cache": 0,
+  "slots": 0,
+  "staging": true,
+  "chunk": null,
+  "ok": false,
+  "experimental": true,
+  "ram_for_all_experts": 45298483200,
+  "min_budget": 9647197568.0,
+  "reason": "6.7 GB is not enough at 16K context: the model needs about 7.0 GB before any expert cache, and 9.6 GB in total"
+ },
+ "error": "6.7 GB is not enough at 16K context: the model needs about 7.0 GB before any expert cache, and 9.6 GB in total"
+}

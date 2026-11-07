@@ -1,0 +1,422 @@
+{
+ "label": "4.05-card-256k",
+ "quant": "4.05",
+ "usable_gb": 29.07,
+ "context": 262144,
+ "nostage": false,
+ "mtp": 0,
+ "cpu_lane": null,
+ "prefetch": false,
+ "workload": "resize-stress",
+ "protocol": "benchmark.py",
+ "date": "2026-11-07 04:41",
+ "device_used_before_gb": 1.93,
+ "card_total_gb": 34.19,
+ "method": "uncapped card",
+ "host": {
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "pcie": "5.0 x16",
+  "display": true,
+  "platform": "windows-wsl",
+  "ram_total_gb": 68.3
+ },
+ "stack": {
+  "torch": "2.15.0+cu132",
+  "cuda": "13.2",
+  "driver": "617.14",
+  "commit": "db4d7e0"
+ },
+ "plan": {
+  "quant": "4.05",
+  "context": 262144,
+  "kv_bits": 4,
+  "budget": 29065105408.0,
+  "fixed": 9438572288.0,
+  "reserve": 1825361100.8,
+  "cache": 17773363200,
+  "slots": 7232,
+  "staging": true,
+  "chunk": 24576,
+  "ok": true,
+  "experimental": false,
+  "ram_for_all_experts": 42624614400,
+  "ram_target": 36584816640.0,
+  "min_budget": 13535234688.0
+ },
+ "ram_gib": 35,
+ "startup_s": 42.0,
+ "model_vram_gb": 27.23,
+ "stress": {
+  "variations": [
+   {
+    "name": "answers and a 32K document while the RAM cache grows",
+    "answers": [
+     {
+      "decode_tps": 44.64,
+      "ttft_s": 11.347
+     },
+     {
+      "decode_tps": 61.47,
+      "ttft_s": 0.195
+     }
+    ],
+    "same_answers": true,
+    "cache_check": {
+     "vram_checked": 64,
+     "vram_bad": 0,
+     "ram_checked": 64,
+     "ram_bad": 0,
+     "table_bad": 0,
+     "rows_stale_nonvram": 52,
+     "home_bad_resident": 0,
+     "home_bad_nonresident": 0,
+     "ram_resident": 9492,
+     "vram_and_ram": 8,
+     "pinned": 0,
+     "dev_bad_rows": 0
+    },
+    "cache_ok": true,
+    "ram": {
+     "growing": false,
+     "freeing": false,
+     "target_slots": 15291,
+     "stopped": null,
+     "free_s": 3.09,
+     "grow_s": 12.25,
+     "ram_slots": 15291,
+     "ram_bytes": 37579161600,
+     "target_bytes": 37579161600,
+     "limit_bytes": 56482058496,
+     "waited_s": 0.0
+    },
+    "memory": {
+     "ram_current_gb": 47.34,
+     "ram_limit_gb": 56.48,
+     "ram_cache_gib": 35.0,
+     "limit_minus_cache_gib": 17.6,
+     "windows_free_gb": 10.59
+    },
+    "under_guard": true,
+    "limits_follow": true,
+    "decode_while_growing": 44.64,
+    "decode_ref": 59.53,
+    "still_growing_after_answer": false,
+    "document_tps_while_growing": 2809.4,
+    "note": "answer 44.6 tok/s while growing (vs 59.5), document 2,809 tok/s",
+    "ok": true
+   },
+   {
+    "name": "a shrink while the RAM cache grows",
+    "answers": [
+     {
+      "decode_tps": 20.18,
+      "ttft_s": 2.014
+     }
+    ],
+    "same_answers": true,
+    "cache_check": {
+     "vram_checked": 64,
+     "vram_bad": 0,
+     "ram_checked": 64,
+     "ram_bad": 0,
+     "table_bad": 0,
+     "rows_stale_nonvram": 0,
+     "home_bad_resident": 0,
+     "home_bad_nonresident": 0,
+     "ram_resident": 3456,
+     "vram_and_ram": 0,
+     "pinned": 0,
+     "dev_bad_rows": 0
+    },
+    "cache_ok": true,
+    "ram": {
+     "growing": false,
+     "freeing": false,
+     "target_slots": 15291,
+     "stopped": "stopped",
+     "free_s": 1.22,
+     "grow_s": 2.75,
+     "ram_slots": 3456,
+     "ram_bytes": 8493465600,
+     "target_bytes": 37579161600,
+     "limit_bytes": 27396362496,
+     "waited_s": 0.01
+    },
+    "memory": {
+     "ram_current_gb": 18.12,
+     "ram_limit_gb": 27.4,
+     "ram_cache_gib": 7.91,
+     "limit_minus_cache_gib": 17.6,
+     "windows_free_gb": 22.54
+    },
+    "under_guard": true,
+    "limits_follow": true,
+    "growing_when_cancelled": true,
+    "slots_when_cancelled": 7040,
+    "shrink_s": 0.4,
+    "note": "cancelled at 7040 experts, shrink took 0.4 s",
+    "ok": true
+   },
+   {
+    "name": "a grow stopped partway, then finished",
+    "answers": [
+     {
+      "decode_tps": 41.06,
+      "ttft_s": 1.487
+     },
+     {
+      "decode_tps": 65.15,
+      "ttft_s": 0.348
+     }
+    ],
+    "same_answers": true,
+    "cache_check": {
+     "vram_checked": 64,
+     "vram_bad": 0,
+     "ram_checked": 64,
+     "ram_bad": 0,
+     "table_bad": 0,
+     "rows_stale_nonvram": 1750,
+     "home_bad_resident": 0,
+     "home_bad_nonresident": 0,
+     "ram_resident": 4011,
+     "vram_and_ram": 5,
+     "pinned": 0,
+     "dev_bad_rows": 0
+    },
+    "cache_ok": true,
+    "ram": {
+     "growing": false,
+     "freeing": false,
+     "target_slots": 15291,
+     "stopped": null,
+     "free_s": 1.22,
+     "grow_s": 16.36,
+     "ram_slots": 15291,
+     "ram_bytes": 37579161600,
+     "target_bytes": 37579161600,
+     "limit_bytes": 56482058496,
+     "waited_s": 0.0
+    },
+    "memory": {
+     "ram_current_gb": 47.34,
+     "ram_limit_gb": 56.48,
+     "ram_cache_gib": 35.0,
+     "limit_minus_cache_gib": 17.6,
+     "windows_free_gb": 10.37
+    },
+    "under_guard": true,
+    "limits_follow": true,
+    "stopped_at": 5248,
+    "target": 15291,
+    "stop_reason": "stopped",
+    "partial": true,
+    "note": "stopped at 5248 of 15291 experts (stopped), then grew to 15291",
+    "ok": true
+   },
+   {
+    "name": "4 quick switches back and forth",
+    "answers": [
+     {
+      "decode_tps": 49.14,
+      "ttft_s": 1.734
+     }
+    ],
+    "same_answers": true,
+    "cache_check": {
+     "vram_checked": 64,
+     "vram_bad": 0,
+     "ram_checked": 64,
+     "ram_bad": 0,
+     "table_bad": 0,
+     "rows_stale_nonvram": 0,
+     "home_bad_resident": 0,
+     "home_bad_nonresident": 0,
+     "ram_resident": 3456,
+     "vram_and_ram": 0,
+     "pinned": 0,
+     "dev_bad_rows": 0
+    },
+    "cache_ok": true,
+    "ram": {
+     "growing": false,
+     "freeing": false,
+     "target_slots": 15291,
+     "stopped": null,
+     "free_s": 1.42,
+     "grow_s": 15.96,
+     "ram_slots": 15291,
+     "ram_bytes": 37579161600,
+     "target_bytes": 37579161600,
+     "limit_bytes": 56482058496,
+     "waited_s": 0.0
+    },
+    "memory": {
+     "ram_current_gb": 47.34,
+     "ram_limit_gb": 56.48,
+     "ram_cache_gib": 35.0,
+     "limit_minus_cache_gib": 17.6,
+     "windows_free_gb": 10.36
+    },
+    "under_guard": true,
+    "limits_follow": true,
+    "ok": true
+   },
+   {
+    "name": "requests around a shrink",
+    "answers": [
+     {
+      "decode_tps": 65.53,
+      "ttft_s": 0.234
+     },
+     {
+      "decode_tps": 65.91,
+      "ttft_s": 3.27
+     },
+     {
+      "decode_tps": 20.28,
+      "ttft_s": 1.95
+     }
+    ],
+    "same_answers": true,
+    "cache_check": {
+     "vram_checked": 64,
+     "vram_bad": 0,
+     "ram_checked": 64,
+     "ram_bad": 0,
+     "table_bad": 0,
+     "rows_stale_nonvram": 0,
+     "home_bad_resident": 0,
+     "home_bad_nonresident": 0,
+     "ram_resident": 3456,
+     "vram_and_ram": 0,
+     "pinned": 0,
+     "dev_bad_rows": 0
+    },
+    "cache_ok": true,
+    "ram": {
+     "growing": false,
+     "freeing": false,
+     "target_slots": 15291,
+     "stopped": null,
+     "free_s": 3.27,
+     "grow_s": 15.96,
+     "ram_slots": 3456,
+     "ram_bytes": 8493465600,
+     "target_bytes": 37579161600,
+     "limit_bytes": 27396362496,
+     "waited_s": 3.18
+    },
+    "memory": {
+     "ram_current_gb": 18.12,
+     "ram_limit_gb": 27.4,
+     "ram_cache_gib": 7.91,
+     "limit_minus_cache_gib": 17.6,
+     "windows_free_gb": 25.05
+    },
+    "under_guard": true,
+    "limits_follow": true,
+    "shrink_s": 7.21,
+    "ttft_arriving_s": 3.27,
+    "ttft_ref_s": 0.332,
+    "note": "the shrink took 7.2 s with a request running; one arriving meanwhile had its first token after 3.3 s",
+    "ok": true
+   }
+  ],
+  "ref": {
+   "at": "full",
+   "vram_used_gb": 29.43,
+   "engine": {
+    "slots": 7232,
+    "arena_gb": 17.77,
+    "mem_peak_gb": 26.44,
+    "hit_rate": 0.1888,
+    "stage_overflow": 0,
+    "ram_slots": 15291,
+    "picks_vram_pct": 93.3,
+    "picks_ram_pct": 4.9,
+    "picks_nvme_pct": 1.9
+   },
+   "text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+   "again_text": "A jet engine operates on the principle of Newton\u2019s third law, generating thrust by expelling high-speed exhaust gases backward. The process begins in the intake, where a large fan or compressor draws in ambient air and significantly increases its pressure. This compression is crucial, as it prepares the air for efficient combustion by raising its density and temperature before it enters the combustion chamber.\n\nInside the combustion chamber, fuel is injected into the highly compressed air and ignited, creating a controlled explosion that dramatically increases the gas temperature and volume. This high-energy gas then expands rapidly and flows through a series of turbine blades, causing them to spin at high speeds. The turbine is mechanically linked to the compressor at the front of the engine, using the energy from the expanding gases to drive the continuous intake and compression of new air.\n\nFinally, the remaining high-pressure, high-temperature gases exit through the nozzle at the rear of the engine. As these gases accelerate out of the nozzle, they create a powerful forward reaction force known as thrust, which propels the aircraft forward. This continuous cycle of intake, compression, combustion, and exhaust allows the jet engine to sustain flight efficiently at high speeds and altitudes.",
+   "answer": {
+    "prompt_tokens": 27,
+    "completion_tokens": 238,
+    "ttft_s": 0.332,
+    "prefill_tps": 81.3,
+    "decode_tps": 59.53,
+    "wall_s": 4.3
+   },
+   "again": {
+    "prompt_tokens": 27,
+    "completion_tokens": 238,
+    "ttft_s": 0.218,
+    "prefill_tps": 123.7,
+    "decode_tps": 64.16,
+    "wall_s": 3.9
+   },
+   "document": {
+    "prompt_tokens": 32747,
+    "completion_tokens": 38,
+    "ttft_s": 10.258,
+    "prefill_tps": 3192.4,
+    "decode_tps": 46.72,
+    "wall_s": 11.1
+   },
+   "verify": {
+    "vram_checked": 64,
+    "vram_bad": 0,
+    "ram_checked": 64,
+    "ram_bad": 0,
+    "table_bad": 0,
+    "rows_stale_nonvram": 230,
+    "home_bad_resident": 0,
+    "home_bad_nonresident": 0,
+    "ram_resident": 10621,
+    "vram_and_ram": 8,
+    "pinned": 0,
+    "dev_bad_rows": 0
+   },
+   "verify_ok": true
+  },
+  "memory_at_start": {
+   "ram_current_gb": 47.34,
+   "ram_limit_gb": 56.48,
+   "ram_cache_gib": 35.0,
+   "limit_minus_cache_gib": 17.6,
+   "windows_free_gb": 9.46
+  },
+  "checks": {
+   "all_ok": true,
+   "failed": [],
+   "windows_free_min_gb": 10.36,
+   "engine_ram_max_gb": 47.34
+  }
+ },
+ "decode_runs": [
+  {
+   "prompt_tokens": 27,
+   "completion_tokens": 238,
+   "ttft_s": 0.332,
+   "prefill_tps": 81.3,
+   "decode_tps": 59.53,
+   "wall_s": 4.3
+  }
+ ],
+ "decode_tps_median": 59.53,
+ "decode_tps_min": 59.53,
+ "short_ttft_median_s": 0.332,
+ "engine": {
+  "slots": 7168,
+  "arena_gb": 17.62,
+  "mem_peak_gb": 26.44,
+  "hit_rate": 0.1882,
+  "stage_overflow": 0,
+  "ram_slots": 15291,
+  "picks_vram_pct": 89.1,
+  "picks_ram_pct": 8.2,
+  "picks_nvme_pct": 2.7
+ },
+ "previous": null,
+ "finished": true
+}

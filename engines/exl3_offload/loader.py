@@ -80,7 +80,8 @@ def plan_env(store, man, ram_gb, cpu, environ=None):
         raise ValueError(f"cpu=True needs 3-bit experts (the CPU lane's AVX2 kernels decode K=3 trellises); this store "
                          f"has {expert_bits(man)}-bit experts: load it with cpu=False")
     if env.get("GLM53_ZC_VRAM") or env.get("GLM53_CPU_TIER", "0") not in ("", "0"):
-        raise ValueError("GLM53_ZC_VRAM / GLM53_CPU_TIER belong to the engine's all-RAM modes, not the NVMe mode: unset them")
+        raise ValueError("GLM53_ZC_VRAM / GLM53_CPU_TIER belong to the engine's all-RAM modes, not the NVMe mode: "
+                         "unset them")
     out = {"GLM53_NV": "2", "GLM53_EC": "1", "GLM53_NV_STORE": str(store), "GLM53_NV_CPU": "1" if cpu else "0"}
     if ram_gb is not None:
         out["GLM53_NV_RAM_GB"] = repr(float(ram_gb))

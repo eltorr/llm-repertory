@@ -1,0 +1,231 @@
+{
+ "card": "rtx5090",
+ "config": "torch 2.15.0+cu132, CUDA 13.2; 4.05 bpw full, 256K ctx, 40 GiB RAM cache",
+ "started": "2026-11-05T03:39:27-0600",
+ "ctx_len": 262144,
+ "protocol": "bench/sweep.py v1",
+ "template": "qwen",
+ "tol": 0.05,
+ "best_known_before": {},
+ "server_args": {
+  "max_running_requests": 1,
+  "max_total_num_tokens": 262144,
+  "chunked_prefill_size": 24576,
+  "kv_cache_dtype": "4",
+  "context_length": 262144,
+  "mem_fraction_static": null,
+  "max_mamba_cache_size": null
+ },
+ "prefill": {
+  "8192": {
+   "median": 868.9,
+   "min": 825.7,
+   "max": 869.8,
+   "n": 3,
+   "all": [
+    825.7,
+    869.8,
+    868.9
+   ]
+  },
+  "16384": {
+   "median": 1651.4,
+   "min": 1625.9,
+   "max": 1680.4,
+   "n": 3,
+   "all": [
+    1625.9,
+    1651.4,
+    1680.4
+   ]
+  },
+  "32768": {
+   "median": 2233.8,
+   "min": 2153.6,
+   "max": 2273.4,
+   "n": 3,
+   "all": [
+    2153.6,
+    2233.8,
+    2273.4
+   ]
+  },
+  "65536": {
+   "median": 3098.5,
+   "min": 3098.2,
+   "max": 3155.4,
+   "n": 3,
+   "all": [
+    3098.2,
+    3098.5,
+    3155.4
+   ]
+  }
+ },
+ "decode": {
+  "C1": {
+   "aggregate": {
+    "median": 51.175,
+    "min": 50.49,
+    "max": 51.86,
+    "n": 2,
+    "all": [
+     50.49,
+     51.86
+    ]
+   },
+   "per_stream_mean": {
+    "median": 51.144999999999996,
+    "min": 50.46,
+    "max": 51.83,
+    "n": 2,
+    "all": [
+     50.46,
+     51.83
+    ]
+   },
+   "rounds": [
+    {
+     "aggregate": 50.49,
+     "per_stream_mean": 50.46,
+     "per_stream_min": 50.46,
+     "tokens": 1357,
+     "finish": [
+      "stop"
+     ],
+     "ttft_max": 4.2
+    },
+    {
+     "aggregate": 51.86,
+     "per_stream_mean": 51.83,
+     "per_stream_min": 51.83,
+     "tokens": 1721,
+     "finish": [
+      "stop"
+     ],
+     "ttft_max": 1.58
+    }
+   ],
+   "gpu_power_w_mean": 217.1
+  },
+  "C2": {
+   "aggregate": {
+    "median": 53.849999999999994,
+    "min": 53.47,
+    "max": 54.23,
+    "n": 2,
+    "all": [
+     54.23,
+     53.47
+    ]
+   },
+   "per_stream_mean": {
+    "median": 54.985,
+    "min": 54.53,
+    "max": 55.44,
+    "n": 2,
+    "all": [
+     55.44,
+     54.53
+    ]
+   },
+   "rounds": [
+    {
+     "aggregate": 54.23,
+     "per_stream_mean": 55.44,
+     "per_stream_min": 54.28,
+     "tokens": 2772,
+     "finish": [
+      "stop"
+     ],
+     "ttft_max": 26.15
+    },
+    {
+     "aggregate": 53.47,
+     "per_stream_mean": 54.53,
+     "per_stream_min": 53.22,
+     "tokens": 3257,
+     "finish": [
+      "stop"
+     ],
+     "ttft_max": 34.51
+    }
+   ],
+   "gpu_power_w_mean": 234.7
+  },
+  "C1@32k": {
+   "aggregate": {
+    "median": 54.745000000000005,
+    "min": 53.77,
+    "max": 55.72,
+    "n": 2,
+    "all": [
+     53.77,
+     55.72
+    ]
+   },
+   "rounds": [
+    {
+     "aggregate": 53.77,
+     "per_stream_mean": 53.75,
+     "per_stream_min": 53.75,
+     "tokens": 2271,
+     "finish": [
+      "stop"
+     ],
+     "ttft_max": 9.86
+    },
+    {
+     "aggregate": 55.72,
+     "per_stream_mean": 55.69,
+     "per_stream_min": 55.69,
+     "tokens": 1804,
+     "finish": [
+      "stop"
+     ],
+     "ttft_max": 1.12
+    }
+   ]
+  }
+ },
+ "status": "DONE",
+ "gates": {
+  "prefill_8192": {
+   "value": 868.9,
+   "best_known": null,
+   "pass": true
+  },
+  "prefill_16384": {
+   "value": 1651.4,
+   "best_known": null,
+   "pass": true
+  },
+  "prefill_32768": {
+   "value": 2233.8,
+   "best_known": null,
+   "pass": true
+  },
+  "prefill_65536": {
+   "value": 3098.5,
+   "best_known": null,
+   "pass": true
+  },
+  "decode_C1": {
+   "value": 51.17,
+   "best_known": null,
+   "pass": true
+  }
+ },
+ "prompt_sha256": [
+  "ede3d38e2e731b62b1308e948c377ea879322cca5e8efedce09428af6792000c",
+  "5ae2cedeff483a146506cbb656e9a2da700ac721edebe20b3bcd3d57969e7619",
+  "ede3d38e2e731b62b1308e948c377ea879322cca5e8efedce09428af6792000c",
+  "0edfb1a1f7745b4d8e3ce97aaec160562885b13a7c248797ad9ad7f1ad738586",
+  "5ae2cedeff483a146506cbb656e9a2da700ac721edebe20b3bcd3d57969e7619",
+  "c73a5ae9134c225b9b939289cc408622ea864b5c579d68fecbcfe5ea53337e79",
+  "b14d2843e5059dad646a1059809ef7c777498137398c56626896d2c66125e1d2",
+  "1e318c0c64456634d8ab1a0e582d42371a6d1010422f30d3edff981b657aac0a"
+ ],
+ "nonce_prefix": "c7921abd066ce7d8982810004bcac1b2",
+ "finished": "2026-11-05T03:46:49-0600"
+}

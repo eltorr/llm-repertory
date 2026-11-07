@@ -1,0 +1,23 @@
+# Python environments, caches and build output
+.venv/
+.venv-manager/
+.venv-scan/
+.ruff_cache/
+__pycache__/
+*.pyc
+*.egg-info/
+/glm53-flash-offload/build/
+/exllamav3/build/
+/exllamav3/exllamav3_ext*.so
+
+# Models, expert stores and the engine's runtime state (setup/50_model.sh, bin/repertory-backend)
+/model/
+/model-*/
+/store/
+/.repertory/
+
+# Left in an engine checkout by the versions before Repertory: never committed, never swept into a stash
+/.qwenflash/
+/qwen38-flash-offload/
+/http-download.json
+/restore.log

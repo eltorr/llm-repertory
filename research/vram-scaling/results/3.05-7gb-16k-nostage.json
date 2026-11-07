@@ -1,0 +1,87 @@
+{
+ "label": "3.05-7gb-16k-nostage",
+ "quant": "3.05",
+ "usable_gb": 7.0,
+ "context": 16384,
+ "nostage": true,
+ "device_used_before_gb": 0.94,
+ "method": "engine cap (limit + guard)",
+ "plan": {
+  "quant": "3.05",
+  "context": 16384,
+  "kv_bits": 4,
+  "budget": 7000000000.0,
+  "fixed": 6326160768.0,
+  "reserve": 900000000.0,
+  "cache": 0,
+  "slots": 0,
+  "staging": true,
+  "chunk": null,
+  "ok": false,
+  "experimental": true,
+  "ram_for_all_experts": 45298483200,
+  "min_budget": 9017197568.0,
+  "reason": "7.0 GB is not enough at 16K context: the model needs about 6.3 GB before any expert cache, and 9.0 GB in total"
+ },
+ "ram_gib": 38,
+ "startup_s": 61.1,
+ "model_vram_gb": 6.39,
+ "cold_first": {
+  "prompt_tokens": 74,
+  "completion_tokens": 600,
+  "ttft_s": 2.7454559803009033,
+  "decode_tps": 19.402791511468635,
+  "wall_s": 33.61740255355835
+ },
+ "decode_tps_median": 21.94069167163824,
+ "decode_tps_min": 21.729073367888997,
+ "short_ttft_median_s": 0.41410064697265625,
+ "long": {
+  "prompt_tokens": 0,
+  "completion_tokens": 0,
+  "ttft_s": null,
+  "decode_tps": null,
+  "wall_s": 0.7758352756500244,
+  "prefill_tps": null,
+  "needle_found": false
+ },
+ "decode_runs": [
+  {
+   "prompt_tokens": 71,
+   "completion_tokens": 700,
+   "ttft_s": 0.393876314163208,
+   "decode_tps": 21.729073367888997,
+   "wall_s": 32.56285500526428
+  },
+  {
+   "prompt_tokens": 73,
+   "completion_tokens": 700,
+   "ttft_s": 0.43034839630126953,
+   "decode_tps": 21.884788014754037,
+   "wall_s": 32.3704137802124
+  },
+  {
+   "prompt_tokens": 69,
+   "completion_tokens": 700,
+   "ttft_s": 0.44488048553466797,
+   "decode_tps": 21.968594354824713,
+   "wall_s": 32.2630934715271
+  },
+  {
+   "prompt_tokens": 76,
+   "completion_tokens": 700,
+   "ttft_s": 0.41410064697265625,
+   "decode_tps": 22.004225688319142,
+   "wall_s": 32.18086266517639
+  },
+  {
+   "prompt_tokens": 67,
+   "completion_tokens": 700,
+   "ttft_s": 0.3913853168487549,
+   "decode_tps": 21.94069167163824,
+   "wall_s": 32.25014042854309
+  }
+ ],
+ "error": "workload failed: [Errno 104] Connection reset by peer",
+ "log_tail": "[   179s] QWEN_PREFILL {\"prompt_tokens\": 70, \"cached_tokens\": 0, \"first_stream_seconds\": 0.4427358760003699, \"recurrent_checkpoints\": 0, \"recurrent_cache_bytes\": 0}\n[   211s] INFO:     127.0.0.1:42638 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[   212s] QWEN_PREFILL {\"prompt_tokens\": 77, \"cached_tokens\": 0, \"first_stream_seconds\": 0.41129259500303306, \"recurrent_checkpoints\": 0, \"recurrent_cache_bytes\": 0}\n[   243s] INFO:     127.0.0.1:42090 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[   244s] QWEN_PREFILL {\"prompt_tokens\": 68, \"cached_tokens\": 0, \"first_stream_seconds\": 0.38932979999663075, \"recurrent_checkpoints\": 0, \"recurrent_cache_bytes\": 0}\n[   276s] INFO:     127.0.0.1:41154 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK\n[   276s] VRAM LIMIT EXCEEDED: 8256565248 > 8194766976\n[   276s] TORCH MEMORY AT EXIT: allocated=5560634368 reserved=6039797760"
+}

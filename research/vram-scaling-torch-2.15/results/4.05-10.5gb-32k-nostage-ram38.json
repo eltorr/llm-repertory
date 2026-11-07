@@ -1,0 +1,114 @@
+{
+ "label": "4.05-10.5gb-32k-nostage-ram38",
+ "quant": "4.05",
+ "usable_gb": 10.5,
+ "context": 32768,
+ "nostage": true,
+ "workload": "standard",
+ "protocol": "benchmark.py",
+ "date": "2026-11-05 23:33",
+ "device_used_before_gb": 2.29,
+ "card_total_gb": 34.19,
+ "method": "engine cap (limit + guard)",
+ "host": {
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "pcie": "5.0 x16",
+  "display": true,
+  "platform": "windows-wsl",
+  "ram_total_gb": 68.3
+ },
+ "stack": {
+  "torch": "2.15.0+cu132",
+  "cuda": "13.2",
+  "driver": "617.14",
+  "commit": "e70fbe6"
+ },
+ "plan": {
+  "quant": "4.05",
+  "context": 32768,
+  "kv_bits": 4,
+  "budget": 10500000000.0,
+  "fixed": 6972321536.0,
+  "reserve": 822560000.0,
+  "cache": 2673868800,
+  "slots": 1088,
+  "staging": false,
+  "chunk": 1536,
+  "ok": true,
+  "experimental": true,
+  "ram_for_all_experts": 57724108800,
+  "min_budget": 11068983936.0
+ },
+ "ram_gib": 38,
+ "startup_s": 61.7,
+ "model_vram_gb": 9.45,
+ "decode_runs": [
+  {
+   "prompt_tokens": 27,
+   "completion_tokens": 238,
+   "ttft_s": 0.432,
+   "decode_tps": 30.82,
+   "wall_s": 8.2,
+   "prefill_tps": 62.5
+  },
+  {
+   "prompt_tokens": 27,
+   "completion_tokens": 243,
+   "ttft_s": 0.548,
+   "decode_tps": 29.55,
+   "wall_s": 8.8,
+   "prefill_tps": 49.3
+  },
+  {
+   "prompt_tokens": 27,
+   "completion_tokens": 238,
+   "ttft_s": 0.573,
+   "decode_tps": 29.3,
+   "wall_s": 8.7,
+   "prefill_tps": 47.1
+  }
+ ],
+ "prefill": {
+  "1024": {
+   "median": 326.8,
+   "runs": [
+    270.8,
+    341.3,
+    326.8
+   ]
+  },
+  "8192": {
+   "median": 1090.6,
+   "runs": [
+    1073.5,
+    1090.6,
+    1104.4
+   ]
+  }
+ },
+ "decode_tps_median": 29.55,
+ "decode_tps_min": 29.3,
+ "short_ttft_median_s": 0.548,
+ "long": {
+  "prompt_tokens": 30726,
+  "completion_tokens": 23,
+  "ttft_s": 27.818,
+  "decode_tps": 24.51,
+  "wall_s": 28.8,
+  "prefill_tps": 1104.5,
+  "codes_found": true
+ },
+ "engine": {
+  "slots": 1088,
+  "arena_gb": 2.67,
+  "mem_peak_gb": 9.14,
+  "hit_rate": 0.0,
+  "stage_overflow": null,
+  "ram_slots": 16602,
+  "picks_vram_pct": 53.9,
+  "picks_ram_pct": 43.4,
+  "picks_nvme_pct": 2.7
+ },
+ "previous": null,
+ "finished": true
+}

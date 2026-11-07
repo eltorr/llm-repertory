@@ -1,0 +1,132 @@
+{
+ "workload": "standard",
+ "protocol": "benchmark.py",
+ "runs": [
+  {
+   "quant": "3.05",
+   "vram_gb": 30.0,
+   "context": 262144,
+   "nostage": false,
+   "ram": 38,
+   "label": "3.05-30gb-256k-ram38",
+   "spec": "3.05:30:262144:ram=38"
+  },
+  {
+   "quant": "3.05",
+   "vram_gb": 22.0,
+   "context": 262144,
+   "nostage": false,
+   "ram": 38,
+   "label": "3.05-22gb-256k-ram38",
+   "spec": "3.05:22:262144:ram=38"
+  },
+  {
+   "quant": "3.05",
+   "vram_gb": 14.5,
+   "context": 262144,
+   "nostage": false,
+   "ram": 38,
+   "label": "3.05-14.5gb-256k-ram38",
+   "spec": "3.05:14.5:262144:ram=38"
+  },
+  {
+   "quant": "3.05",
+   "vram_gb": 10.5,
+   "context": 65536,
+   "nostage": false,
+   "ram": 38,
+   "label": "3.05-10.5gb-64k-ram38",
+   "spec": "3.05:10.5:65536:ram=38"
+  },
+  {
+   "quant": "3.05",
+   "vram_gb": 10.5,
+   "context": 131072,
+   "nostage": true,
+   "ram": 38,
+   "label": "3.05-10.5gb-128k-nostage-ram38",
+   "spec": "3.05:10.5:131072:nostage:ram=38"
+  },
+  {
+   "quant": "3.05",
+   "vram_gb": 8.0,
+   "context": 16384,
+   "nostage": true,
+   "ram": 38,
+   "label": "3.05-8gb-16k-nostage-ram38",
+   "spec": "3.05:8:16384:nostage:ram=38"
+  },
+  {
+   "quant": "3.05",
+   "vram_gb": 7.0,
+   "context": 16384,
+   "nostage": true,
+   "ram": 38,
+   "label": "3.05-7gb-16k-nostage-ram38",
+   "spec": "3.05:7:16384:nostage:ram=38"
+  },
+  {
+   "quant": "4.05",
+   "vram_gb": 30.0,
+   "context": 262144,
+   "nostage": false,
+   "ram": 38,
+   "label": "4.05-30gb-256k-ram38",
+   "spec": "4.05:30:262144:ram=38"
+  },
+  {
+   "quant": "4.05",
+   "vram_gb": 22.0,
+   "context": 262144,
+   "nostage": false,
+   "ram": 38,
+   "label": "4.05-22gb-256k-ram38",
+   "spec": "4.05:22:262144:ram=38"
+  },
+  {
+   "quant": "4.05",
+   "vram_gb": 14.5,
+   "context": 262144,
+   "nostage": false,
+   "ram": 38,
+   "label": "4.05-14.5gb-256k-ram38",
+   "spec": "4.05:14.5:262144:ram=38"
+  },
+  {
+   "quant": "4.05",
+   "vram_gb": 10.5,
+   "context": 32768,
+   "nostage": true,
+   "ram": 38,
+   "label": "4.05-10.5gb-32k-nostage-ram38",
+   "spec": "4.05:10.5:32768:nostage:ram=38"
+  },
+  {
+   "quant": "3.05",
+   "vram_gb": null,
+   "context": 262144,
+   "nostage": false,
+   "ram": 26,
+   "label": "3.05-card-256k-ram26",
+   "spec": "3.05:card:262144:ram=26"
+  },
+  {
+   "quant": "4.05",
+   "vram_gb": null,
+   "context": 262144,
+   "nostage": false,
+   "ram": 34,
+   "label": "4.05-card-256k-ram34",
+   "spec": "4.05:card:262144:ram=34"
+  },
+  {
+   "quant": "4.05",
+   "vram_gb": null,
+   "context": 262144,
+   "nostage": false,
+   "ram": 40,
+   "label": "4.05-card-256k-ram40",
+   "spec": "4.05:card:262144:ram=40"
+  }
+ ]
+}
