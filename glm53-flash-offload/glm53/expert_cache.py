@@ -20,8 +20,15 @@ picks per layer, each layer's NON-cached experts are copied host -> a VRAM stagi
 one layer ahead, while the previous layer computes; the layer's tables point at the buffer for its MoE and go back to
 home afterwards. Buffer overflow -> the rest stays zero-copy. Cached set read once per forward (no admission in prefill).
 
-Env: GLM53_EC=1 (serve.py), GLM53_EC_RESERVE_GB (per GPU, default 2.5), GLM53_EC_ADMIT_MAX (default 64 picks),
-     GLM53_EC_WARM (optional JSON {layer_key: [score x E]}: initial fill by score), GLM53_EC_MAX_SLOTS (per GPU cap)
+Env: GLM53_EC=1 (serve.py), GLM53_EC_RESERVE_GB (per GPU, default 2.5), GLM53_EC_ADMIT_MAX (default 8 tokens x top-k
+     picks: 64 for GLM-5.3-Flash, 80 for Qwen3.8-Flash-Next), GLM53_EC_WARM (optional JSON {layer_key: [score x E]}:
+     initial fill by score), GLM53_EC_MAX_SLOTS (per GPU cap), GLM53_EC_STAGE_GB (per staging buffer; "auto" = one
+     layer's experts, more is never used), GLM53_EC_STAGE_MIN (picks per layer call that make a forward staged)
+The arena is sized from the free VRAM after load, within torch's per-process memory fraction when one is set
+(torch.cuda.set_per_process_memory_fraction).
+Layers: every exllamav3 BlockSparseMLP with quantized experts on a GPU (find_moe); modules without one (dense layers,
+GLM-5.3-Flash's first layers, Qwen3.8-Flash-Next's n-gram embedding layer) are not part of the cache. Shared experts stay
+in their GatedMLP (not cached).
 """
 import json, os, time
 import numpy as np
@@ -289,6 +296,15 @@ def install():
     print(" -- expert_cache installed", flush=True)
 
 
+def slot_layout(sg, su, sd):
+    """One expert's VRAM slot from its gate / up / down trellis bytes: gate | up @ off_u | down @ off_d, each start
+    256-aligned. Returns (off_u, off_d, slot bytes); the NVMe store's records begin with exactly this image."""
+    al = lambda x: (x + 255) // 256 * 256
+    off_u = al(sg)
+    off_d = off_u + al(su)
+    return off_u, off_d, off_d + al(sd)
+
+
 class Pool:
     def __init__(self, device, mods, reserve, max_slots, admit_max, stage_bytes=0, stage_min=8192):
         self.device = device
@@ -300,20 +316,25 @@ class Pool:
         m0 = mods[0]
         self.E = m0.num_local_experts or m0.num_experts
         self.first = int(m0.routing_first or 0)
-        assert all((m.num_local_experts or m.num_experts) == self.E and int(m.routing_first or 0) == self.first for m in mods)
+        self.topk = m0.num_experts_per_tok
+        assert all((m.num_local_experts or m.num_experts) == self.E and int(m.routing_first or 0) == self.first
+                   and m.num_experts_per_tok == self.topk for m in mods)
         sizes = [m0.multi_gate.linears[0].inner.trellis.numel() * m0.multi_gate.linears[0].inner.trellis.element_size(),
                  m0.multi_up.linears[0].inner.trellis.numel() * m0.multi_up.linears[0].inner.trellis.element_size(),
                  m0.multi_down.linears[0].inner.trellis.numel() * m0.multi_down.linears[0].inner.trellis.element_size()]
-        al = lambda x: (x + 255) // 256 * 256
         self.sg, self.su, self.sd = sizes
-        self.off_u = al(self.sg); self.off_d = self.off_u + al(self.su); self.rec = self.off_d + al(self.sd)
+        self.off_u, self.off_d, self.rec = slot_layout(*sizes)
         for m in mods:
             for mm, s in ((m.multi_gate, self.sg), (m.multi_up, self.su), (m.multi_down, self.sd)):
                 for l in mm.linears:
                     assert l.inner.trellis.numel() * l.inner.trellis.element_size() == s and s % 16 == 0
         torch.cuda.synchronize(device); torch.cuda.empty_cache()
-        free, _ = torch.cuda.mem_get_info(device)
-        nst = int(stage_bytes // self.rec) if stage_bytes > 0 else 0
+        free, total = torch.cuda.mem_get_info(device)
+        frac = torch.cuda.get_per_process_memory_fraction(device) if hasattr(torch.cuda, "get_per_process_memory_fraction") else 1.0
+        if frac < 1.0:   # torch's allocator refuses past frac * total: size the arena (and leave the reserve) inside it
+            free = min(free, int(frac * total) - torch.cuda.memory_reserved(device))
+        # staging buffer: one layer's non-cached experts at most (stage_bytes < 0: "auto" = exactly that)
+        nst = self.E if stage_bytes < 0 else min(self.E, int(stage_bytes // self.rec)) if stage_bytes > 0 else 0
         self.stage_n = nst
         self.elastic = float(os.environ.get("GLM53_EC_ELASTIC_GB", "0")) * 1024 ** 3
         self.stage = None
@@ -553,7 +574,7 @@ class Pool:
                 self._pfev = []
             if self.elastic and not self.in_prefill:
                 t_el = time.perf_counter()
-                self._elastic_enter(n_picks // 8)
+                self._elastic_enter(n_picks // self.topk)
                 self.stage_stats["elastic_enter_ms"] = self.stage_stats.get("elastic_enter_ms", 0) + (time.perf_counter() - t_el) * 1e3
             self.slot_np = self.slotof.cpu().numpy()    # stable during prefill (no admission)
             t = time.perf_counter()
@@ -748,7 +769,7 @@ def _hook_prefill(cls):
             except Exception:
                 n = 0
             for p in POOLS:
-                if p.elastic and p.stage_n and not p.in_prefill and n * 8 >= p.stage_min:
+                if p.elastic and p.stage_n and not p.in_prefill and n * p.topk >= p.stage_min:
                     p._elastic_enter(n)
             return _orig(self, input_ids, params)
         setattr(cls, name, wrapped)
@@ -761,26 +782,31 @@ def attach_modules(mods):
         by_dev.setdefault(str(m.device), []).append(m)
     reserve = float(os.environ.get("GLM53_EC_RESERVE_GB", "2.5")) * 1024 ** 3
     mx = os.environ.get("GLM53_EC_MAX_SLOTS")
-    admit_max = int(os.environ.get("GLM53_EC_ADMIT_MAX", "64"))
-    stage_bytes = float(os.environ.get("GLM53_EC_STAGE_GB", "0")) * 1024 ** 3
+    am = os.environ.get("GLM53_EC_ADMIT_MAX")
+    sg = os.environ.get("GLM53_EC_STAGE_GB", "0")
+    stage_bytes = -1 if sg == "auto" else float(sg) * 1024 ** 3
     stage_min = int(os.environ.get("GLM53_EC_STAGE_MIN", "8192"))
     warm = os.environ.get("GLM53_EC_WARM")
     scores = json.load(open(warm)) if warm else None
     for dev, ms in by_dev.items():
+        # decode admission: up to 8 tokens (exllamav3's fused bsz <= 8 path) x top-k picks, unless set
+        admit_max = int(am) if am else 8 * ms[0].num_experts_per_tok
         p = Pool(torch.device(dev), ms, reserve, int(mx) if mx else None, admit_max, stage_bytes, stage_min)
         POOLS.append(p)
+        sc = scores
         if os.environ.get("GLM53_NV") == "1":   # N116: NVMe tier (RAM warm first: the VRAM warm copies from RAM)
             import nv_tier
             nv_tier.attach_pool(p)
-            if scores:
-                p.nv.warm(scores)
+            if sc:
+                p.nv.warm(sc)
         if os.environ.get("GLM53_NV") == "2":   # N119: nv2 (RAM warm first: the VRAM warm copies from RAM)
             import nv2
             nv2.attach_pool(p)
-            if scores:
-                p.nv2.warm(scores)
-        if scores:
-            p.warm(scores)
+            if not sc:   # no score file for this model: warm both tiers in expert order rather than start them empty
+                sc = {m.key: [0.0] * p.E for m in ms}
+            p.nv2.warm(sc)
+        if sc:
+            p.warm(sc)
         if p.nv is not None:
             p.nv.post_warm()
         if p.nv2 is not None:

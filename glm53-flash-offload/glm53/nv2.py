@@ -26,6 +26,11 @@ N137 B70 expert tier (needs the CPU tier, GLM53_NV_CPU=1): GLM53_B70 (0), GLM53_
      created by b70tier/b70srv.py on the B70), GLM53_B70_N (3000 experts), GLM53_B70_ORDER (score: warm-score order after the VRAM warm
      set | rr: the RAM tier's round-robin rank), GLM53_B70_TIMEOUT_S (2). Decode picks of B70-resident experts are masked
      on the 3090 and computed on the B70; their RAM copies are dropped (exclusive) and RAM refills with colder experts.
+     GLM-5.3-Flash only (the B70 server and its ring are built for its 288 x 4096 geometry).
+Geometry comes from the model and the store manifest (GLM-5.3-Flash: 42 MoE layers x 288 experts, top-8, hidden 4096,
+expert width 2048; Qwen3.8-Flash-Next: 48 x 512, top-10, 2560, 640), checked against the engine's compile-time caps
+(kernels/nv2/nv2_shared.h: MAXU unique experts per layer call, MAXP picks with payload). The CPU tier's AVX2 kernels
+decode 3-bit mul1 experts only (EXL3 3.05bpw); other bit widths run with GLM53_NV_CPU=0.
 """
 import collections, concurrent.futures as cf, ctypes, json, mmap, os, signal, threading, time
 import numpy as np
@@ -55,9 +60,9 @@ def ext():
         here = os.path.join(root, "kernels", "nv2")   # nv2_host.cpp, nv2_dev.cu, nv2_shared.h, ft_core.h
         d = os.environ.get("GLM53_NV2_BUILD", os.path.join(root, "build", "nv2"))
         os.makedirs(d, exist_ok=True)
+        # the C++ standard is torch's own (cpp_extension passes it: C++17, C++20 from PyTorch 2.10 on)
         _EXT = load(name="glm53_nv2", sources=[os.path.join(here, "nv2_host.cpp"), os.path.join(here, "nv2_dev.cu")],
-                    build_directory=d, extra_cflags=["-O3", "-mavx2", "-mfma", "-mf16c", "-mtune=znver3", "-std=c++17",
-                                                     "-I" + here],
+                    build_directory=d, extra_cflags=["-O3", "-mavx2", "-mfma", "-mf16c", "-mtune=znver3", "-I" + here],
                     extra_cuda_cflags=["-O3", "-I" + here], extra_ldflags=["-lpthread"], verbose=False)
     return _EXT
 
@@ -88,18 +93,25 @@ class Nv2:
         self.store, man = NT._manifest()
         self.rec_bytes = man["record_bytes"]
         self.slot = man["vram_slot"]["slot_bytes"]
-        assert (pool.sg, pool.su, pool.sd) == (3145728, 3145728, 3145728) and pool.rec == self.slot
-        assert pool.off_u == man["vram_slot"]["off_u"] and pool.off_d == man["vram_slot"]["off_d"]
-        assert pool.first == 0 and pool.E == man["experts_per_layer"]
+        NT.check_pool_layout(pool, man)
         li_of = {L["key"]: L["li"] for L in man["layers"]}
         assert [li_of[m.key] for m in pool.mods] == list(range(len(pool.mods))), "pool layer order != store layer order"
         self.L, self.E = len(pool.mods), pool.E
         self.K = self.L * self.E
         m0 = pool.mods[0]
         self.H, self.I = m0.hidden_size, m0.intermediate_size
+        self.topk = pool.topk
         self.act_limit = float(getattr(m0, "act_limit", 0.0) or 0.0)
+        assert self.E <= self.MAXU, f"{self.E} experts per layer > the engine's MAXU {self.MAXU} (kernels/nv2/nv2_shared.h)"
+        if self.MAXB * self.topk > self.MAXP:
+            NT._log(f"nv2: top-{self.topk} x {self.MAXB} tokens > MAXP {self.MAXP}: decode calls over "
+                    f"{self.MAXP // self.topk} tokens run without the CPU lane")
         g = lambda k, d: os.environ.get(k, d)
         self.cpu_on = g("GLM53_NV_CPU", "0") == "1"
+        if self.cpu_on:   # the AVX2 kernels (ft_core.h / ft_n135.h) decode 3-bit mul1 trellises
+            ks = {(mm.K, bool(mm.mul1)) for m in pool.mods for mm in (m.multi_gate, m.multi_up, m.multi_down)}
+            assert ks == {(3, True)}, f"GLM53_NV_CPU=1 needs 3-bit mul1 experts (EXL3 3.05bpw); this model has " \
+                                      f"(K, mul1) {sorted(ks)}: run with GLM53_NV_CPU=0"
         self.b70 = g("GLM53_B70", "0") == "1"
         assert not self.b70 or self.cpu_on, "GLM53_B70=1 needs the CPU tier (GLM53_NV_CPU=1): the CPU worker runs the B70 lane"
         self.b70_ring = g("GLM53_B70_RING", "/run/local-ai/shared/b70.ring")
@@ -113,7 +125,7 @@ class Nv2:
         # same MoE input; 36-block GEMVs on an 82-SM card), instead of after it on the compute stream (GLM53_NV_PFSIDE=1;
         # single-row decode only, see predict_early)
         self.pfside = self.prefetch and g("GLM53_NV_PFSIDE", "0") == "1"
-        self._pfe = None
+        self._pfe = self._pfz = None
         if self.pfside:
             self.side = torch.cuda.Stream(self.dev)
             self._pfev = [torch.cuda.Event() for _ in range(8)]
@@ -344,17 +356,21 @@ class Nv2:
             zp = zz.data_ptr()
         pf, npf, son = 0, 0, p.slotof[li]
         pre, self._pfe = self._pfe, None
-        if self.prefetch and dec and li + 1 < self.L and bsz <= 8:
+        if self.prefetch and dec and li + 1 < self.L and bsz <= self.MAXB and bsz * self.topk <= self.MAXP:
             if pre is not None and pre[0] == li and pre[1] == bsz:
                 torch.cuda.current_stream(self.dev).wait_event(pre[3])
                 pf = pre[2]
                 self.st["pf_side"] += 1
             else:
                 pf = self._predict(li + 1, z, bsz)
-            npf = bsz * 8
-            son = p.slotof[li + 1]
+            if pf:
+                npf = bsz * self.topk
+                son = p.slotof[li + 1]
         e.nv_pub(s, ww, zp, n, bsz, self.H, li, self.E, p.first, p.slotof[li], 0 if dec else 1, int(send_x),
                  self.a["hc"], self.a["req"], self.a["hx"], self.dc, self.uidx, self.uexp, self.timeout_ns, pf, npf, son)
+        if n > self.sel_out.numel():   # no staging (GLM53_EC_STAGE_GB=0): prefill-sized calls take this path too
+            self.sel_out = torch.empty(n, dtype=torch.int64, device=self.dev)
+            self.w_out = torch.empty(n, dtype=torch.half, device=self.dev)
         so, wo = self.sel_out[:n], self.w_out[:n]
         e.nv_step(s, ww, so, wo, n, p.first, li, self.E, p.S, int(dec), p.slotof, self.a["home"], self.a["res"], p.tabs,
                   p.owner, p.refb, p.pin, p.ctl, p.jobs, self.jobx, self.jobnv, self.dstats, p.cbase.data_ptr(), p.spc,
@@ -382,26 +398,39 @@ class Nv2:
             ptr = self._predict(li + 1, z, bsz)
             e1.record(self.side)
         z.record_stream(self.side)
-        if self._pfz is not z:
+        if ptr and self._pfz is not z:
             self._pfz.record_stream(self.side)
         self._pfe = (li, bsz, ptr, e1)
 
+    # router types the layer-ahead guess can run (exllamav3 BlockSparseMLP.router_type): sigmoid + selection bias
+    # (GLM-5.3-Flash "dots"), softmax top-k (Qwen3.8-Flash-Next "std"), sqrt-softplus + bias (DeepSeek-V4 "sqrtsp")
+    _PRED_ROUTERS = ("dots", "std", "sqrtsp")
+
     def _predict(self, lj, z, bsz):
-        """Layer-ahead routing guess: layer lj's router (sigmoid + selection bias, top-8) on layer lj-1's MoE input,
-        one fused exllamav3 routing kernel into private buffers. Residency hint only (never changes the computation)."""
+        """Layer-ahead routing guess: layer lj's router (its own top-k) on layer lj-1's MoE input, one fused exllamav3
+        routing kernel into private buffers. Residency hint only (never changes the computation). Returns the device
+        address of the guessed expert ids, or 0 (no guess) for router types it cannot run."""
         from exllamav3.modules import block_sparse_mlp_routing as R
-        cfg = self.pool.mods[lj].routing_cfg
+        m = self.pool.mods[lj]
+        if m.router_type not in self._PRED_ROUTERS:
+            return 0
+        cfg = m.routing_cfg
         b = self._pfb.get(bsz)
         if b is None:
             b = self._pfb[bsz] = (torch.empty((bsz, self.E), dtype=torch.half, device=self.dev),
-                                  torch.empty((bsz, 8), dtype=torch.long, device=self.dev),
-                                  torch.empty((bsz, 8), dtype=torch.half, device=self.dev))
+                                  torch.empty((bsz, self.topk), dtype=torch.long, device=self.dev),
+                                  torch.empty((bsz, self.topk), dtype=torch.half, device=self.dev))
         zz = z.view(bsz, -1)
         if zz.dtype != torch.half or not zz.is_contiguous():
             zz = zz.half().contiguous()
         R._gate_t(cfg)
-        R.ext.routing_ds3_nogroup(zz, cfg.gate_tensor, b[0], R._esb_h(cfg), b[1], b[2], cfg.routed_scaling_factor,
-                                  cfg.gate_tensor_t, R.ROUTING_ACT_SIGMOID, cfg.gate_i8, cfg.gate_sb)
+        if m.router_type == "std":
+            R.ext.routing_std(zz, cfg.gate_tensor, b[0], b[1], b[2], cfg.per_expert_scale, cfg.gate_tensor_t, None,
+                              cfg.gate_i8, cfg.gate_sb)
+        else:
+            act = R.ROUTING_ACT_SIGMOID if m.router_type == "dots" else R.ROUTING_ACT_SQRTSP
+            R.ext.routing_ds3_nogroup(zz, cfg.gate_tensor, b[0], R._esb_h(cfg), b[1], b[2], cfg.routed_scaling_factor,
+                                      cfg.gate_tensor_t, act, cfg.gate_i8, cfg.gate_sb)
         self._pfz = zz
         return b[1].data_ptr()
 

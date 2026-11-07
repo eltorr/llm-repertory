@@ -1003,10 +1003,11 @@ void ref_linear(const Mat& m, const std::vector<float>& W, const float* x, float
 
 void ref_expert(const Expert& E, const std::vector<float>* W, const float* x, float* y)
 {
-    std::vector<float> g(2048), u(2048), a(2048);
+    const int I = E.g.n;   // expert intermediate size
+    std::vector<float> g(I), u(I), a(I);
     ref_linear(E.g, W[0], x, g.data());
     ref_linear(E.u, W[1], x, u.data());
-    for (int i = 0; i < 2048; ++i) a[i] = r16(act_gu(g[i], u[i]));
+    for (int i = 0; i < I; ++i) a[i] = r16(act_gu(g[i], u[i]));
     ref_linear(E.d, W[2], a.data(), y);
 }
 
@@ -1044,9 +1045,10 @@ void int8_linear(const Mat& m, const float* x, float* y)
 
 void int8_expert(const Expert& E, const float* x, float* y)
 {
-    std::vector<float> g(2048), u(2048), a(2048);
+    const int I = E.g.n;
+    std::vector<float> g(I), u(I), a(I);
     int8_linear(E.g, x, g.data()); int8_linear(E.u, x, u.data());
-    for (int i = 0; i < 2048; ++i) a[i] = silu(g[i]) * u[i];
+    for (int i = 0; i < I; ++i) a[i] = silu(g[i]) * u[i];
     int8_linear(E.d, a.data(), y);
 }
 

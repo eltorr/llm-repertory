@@ -20,6 +20,11 @@ Endpoints
 No output caps: max_tokens defaults to the remaining context.
 
   python3 glm53/serve.py -m /models -cs 131072 --max-batch-size 8 -chunk_size 8192 -ambs 4 --host 0.0.0.0 --port 30000
+
+As a module (a wrapper server for another model): load the model elsewhere (engines/exl3_offload/loader.py), set the
+globals load() sets (args, model, config, cache, tok, draft_model, draft_cache, EOS, hf_tok, CTX, t_load) and replace
+what is model-specific: chat_prompt, parse_tool_calls, openai_sp, startup, run_job, AsyncJob, and the tags THINK_OPEN,
+THINK_CLOSE, TOOL_OPEN. Everything here looks them up when a request comes in, so assignments take effect.
 """
 import argparse, asyncio, json, os, re, sys, time, uuid
 import torch
@@ -31,9 +36,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import offload_stack, stream_split
 
 app = FastAPI()
 G = {"gen": None, "stats": {"requests": 0, "completion_tokens": 0}}
+THINK_OPEN, THINK_CLOSE = "<think>", "</think>"   # reasoning block (GLM-5.3, Qwen3.8)
+TOOL_OPEN = "<tool_call>"                          # start of a tool call: never streamed as content
 
 
 def load():
@@ -48,56 +56,10 @@ def load():
     ap.add_argument("--max-q-size", type=int, default=8)
     args = ap.parse_args()
 
-    if os.environ.get("GLM53_ZC_VRAM"):
-        import exl3_tiers
-        exl3_tiers.install()
-    if os.environ.get("GLM53_NV") in ("1", "2"):   # N116/N119 NVMe tier: loader skips the routed-expert bytes
-        assert not os.environ.get("GLM53_ZC_VRAM"), "GLM53_NV replaces the pinned home copy (unset GLM53_ZC_VRAM)"
-        import nv_tier
-        nv_tier.install()
-    if os.environ.get("GLM53_EC"):
-        import expert_cache
-        expert_cache.install()
-    if os.environ.get("GLM53_K_OVL") == "1":   # shared experts out of the fused decode kernel (k_overlap.py)
-        import k_overlap
-        k_overlap.install()
-    if os.environ.get("GLM53_TRITON_PIN"):
-        import triton_pin
-        triton_pin.install()
-
+    offload_stack.pre_load()      # the offload stack's loader patches, by GLM53_* flags (offload_stack.py)
     t_load = time.time()
     model, config, cache, tok, draft_model, _draft_config, draft_cache = model_init.init(args)
-    if os.environ.get("GLM53_LA") == "1":   # N136: embedding table host-mapped (device-side lookup for lookahead)
-        import k_lookahead
-        k_lookahead.prep_model(model)
-    if os.environ.get("GLM53_ZC_VRAM"):
-        print(f" -- zero-copy tier summary: {exl3_tiers.summary()}", flush=True)
-    if os.environ.get("GLM53_CPU_TIER") == "1":   # routers wrapped BEFORE the cache attaches
-        import cpu_tier
-        cpu_tier.wrap(model)
-    if os.environ.get("GLM53_EC"):
-        expert_cache.attach(model)
-    if os.environ.get("GLM53_NV") == "1":
-        nv_tier.finish(model)
-    if os.environ.get("GLM53_NV") == "2":
-        import nv2
-        nv2.finish(model)
-    if os.environ.get("GLM53_CPU_TIER") == "1":   # register the pinned home copies, self-test, start the worker
-        cpu_tier.start()
-        if os.environ.get("GLM53_K_FTSPLIT") == "1":   # faster split kernel, bit-identical outputs (k_ftsplit.py)
-            import k_ftsplit
-            k_ftsplit.install()
-    if os.environ.get("GLM53_K_OVL") == "1":   # shared expert on a side stream, after the cache + tier wrap
-        k_overlap.attach(model)
-    if os.environ.get("GLM53_K_HCFUSE") == "1":   # fused hyper-connection sites, bit-exact (k_hcfuse.py)
-        import k_hcfuse
-        k_hcfuse.install(model)
-    if os.environ.get("GLM53_LA") == "1":   # N136: decode lookahead (next forward enqueued before the token is read)
-        k_lookahead.install(model)
-        k_lookahead.set_enabled(os.environ.get("GLM53_LA_ON", "1") == "1")
-    if os.environ.get("GLM53_NVTX") == "1" or os.environ.get("GLM53_PROF"):   # N136 profiling hooks (n136_prof.py)
-        import n136_prof
-        n136_prof.install(model)
+    offload_stack.post_load(model)
     t_load = time.time() - t_load
     print(f" -- loaded in {t_load:.1f} s", flush=True)
 
@@ -125,7 +87,8 @@ def load():
 
 
 def normalize_messages(messages):
-    """OpenAI -> GLM template: assistant tool-call arguments as dicts, content never None."""
+    """OpenAI -> chat template (GLM-5.3's, and templates like it): assistant tool-call arguments as dicts, content
+    never None."""
     out = []
     for m in messages:
         m = dict(m)
@@ -154,8 +117,8 @@ def chat_prompt(messages, enable_thinking=True, tools=None, template_kwargs=None
         p = hf_tok.apply_chat_template(normalize_messages(messages), tools=tools or None, tokenize=False,
                                        add_generation_prompt=True, enable_thinking=enable_thinking, **kw)
         # GLM-5.3's template ends the generation prompt with "<think>"; thinking off = empty think block
-        if not enable_thinking and p.endswith("<think>"):
-            p += "</think>"
+        if not enable_thinking and p.endswith(THINK_OPEN):
+            p += THINK_CLOSE
         return p
     p = "[gMASK]<sop>"
     for m in messages:
@@ -203,6 +166,12 @@ def make_sampler(sp):
 
 
 @app.on_event("startup")
+async def _on_startup():
+    r = startup()   # the module global at start time: a wrapper's own startup when it replaced it
+    if asyncio.iscoroutine(r):
+        await r
+
+
 async def startup():
     G["gen"] = AsyncGenerator(model=model, cache=cache, tokenizer=tok, max_batch_size=args.max_batch_size,
                               max_chunk_size=args.chunk_size, max_q_size=args.max_q_size,
@@ -376,51 +345,40 @@ async def chat(req: Request):
         kw.setdefault("reasoning_effort", body["reasoning_effort"])
     thinking = kw.get("enable_thinking", True)
     tools = body.get("tools") if body.get("tool_choice") != "none" else None
-    ids = tok.encode(chat_prompt(body["messages"], thinking, tools, kw), encode_special_tokens=True)
+    prompt = chat_prompt(body["messages"], thinking, tools, kw)
+    in_think = stream_split.prompt_opens_think(prompt, THINK_OPEN, THINK_CLOSE)   # the answer starts as reasoning
+    ids = tok.encode(prompt, encode_special_tokens=True)
     sp, stops = openai_sp(body), stops_of(body)
     cid, created, P = "chatcmpl-" + uuid.uuid4().hex[:24], int(time.time()), ids.shape[-1]
     if body.get("stream"):
         async def events():
             g = run_job(ids, sp, stops)
             gone, wt = watch_disconnect(req)
-            sent, in_think, held = 0, thinking, ""
+            sent = 0
+            # reasoning / content / tool calls; a possible partial </think> or <tool_call> is held back until known
+            split = stream_split.StreamSplit(in_think, bool(tools), THINK_OPEN, THINK_CLOSE, TOOL_OPEN)
             base = {"id": cid, "object": "chat.completion.chunk", "created": created, "model": args.served_name}
-            yield sse(dict(base, choices=[{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}]))
+            delta = lambda d: sse(dict(base, choices=[{"index": 0, "delta": d, "finish_reason": None}]))
+            kind_key = {"reasoning": "reasoning_content", "content": "content"}
+            yield delta({"role": "assistant", "content": ""})
             n, fin = 0, None
             try:
                 async for text, n, fin in g:
-                    new = text[sent:]
-                    hold = 0   # hold back a possible partial "</think>" at the end of the text
-                    if in_think and fin is None:
-                        for k in range(min(len("</think>") - 1, len(new)), 0, -1):
-                            if "</think>".startswith(new[-k:]):
-                                hold = k; break
-                    new = new[:len(new) - hold] if hold else new
-                    sent += len(new)
-                    while new:
-                        if in_think:
-                            r, sep, rest = new.partition("</think>")
-                            if r:
-                                yield sse(dict(base, choices=[{"index": 0, "delta": {"reasoning_content": r.replace("<think>", "")}, "finish_reason": None}]))
-                            if not sep:
-                                break
-                            in_think, new = False, rest
-                        elif tools:   # tool calls are parsed from the whole answer at the end
-                            held += new
-                            break
-                        else:
-                            yield sse(dict(base, choices=[{"index": 0, "delta": {"content": new}, "finish_reason": None}]))
-                            break
+                    for kind, piece in split.feed(text[sent:]):
+                        yield delta({kind_key[kind]: piece})
+                    sent = len(text)
                     if fin is None and gone.is_set():
                         break
+                for kind, piece in split.finish():
+                    yield delta({kind_key[kind]: piece})
                 reason = (fin or {}).get("type", "stop")
-                if tools:
-                    content, calls = parse_tool_calls(held, tools)
+                if tools and split.tool_text:   # everything from the first tool-call tag on, parsed once at the end
+                    content, calls = parse_tool_calls(split.tool_text, tools)
                     if content:
-                        yield sse(dict(base, choices=[{"index": 0, "delta": {"content": content}, "finish_reason": None}]))
+                        yield delta({"content": content})
                     if calls:
                         reason = "tool_calls"
-                        yield sse(dict(base, choices=[{"index": 0, "delta": {"tool_calls": [dict(c, index=i) for i, c in enumerate(calls)]}, "finish_reason": None}]))
+                        yield delta({"tool_calls": [dict(c, index=i) for i, c in enumerate(calls)]})
                 usage = {"prompt_tokens": P, "completion_tokens": n, "total_tokens": P + n}
                 yield sse(dict(base, choices=[{"index": 0, "delta": {}, "finish_reason": reason}], usage=usage))
                 yield "data: [DONE]\n\n"
@@ -431,12 +389,8 @@ async def chat(req: Request):
     text, n, fin = "", 0, None
     async for text, n, fin in run_job(ids, sp, stops):
         pass
-    if thinking:
-        reasoning, content = split_reasoning(text)
-        if reasoning is None:   # never closed the think block (e.g. hit max_tokens)
-            reasoning, content = text.replace("<think>", "").strip(), ""
-    else:
-        reasoning, content = None, text.strip()
+    # a think block that never closed (e.g. hit max_tokens) is all reasoning
+    reasoning, content = stream_split.split_answer(text, in_think, THINK_OPEN, THINK_CLOSE)
     content, calls = parse_tool_calls(content, tools)
     msg = {"role": "assistant", "content": content, "reasoning_content": reasoning}
     if calls:

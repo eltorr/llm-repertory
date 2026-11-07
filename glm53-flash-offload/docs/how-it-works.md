@@ -333,6 +333,12 @@ These are the settings for the NVMe modes. Defaults are what the entrypoint sets
 `nvme-exact` in brackets where it differs. Settings for the all-RAM modes (`GLM53_CT_*`, `GLM53_K_*`) are in
 [reference.md](reference.md#configuration).
 
+Geometry (experts per layer, top-k, hidden and expert width, layer count) comes from the loaded model and the store's
+manifest, so the NVMe modes also run other MoE checkpoints packed by `scripts/pack_glm53_store.py`, such as
+Qwen3.8-Flash-Next (48 layers x 512 experts, top-10). The engine's compile-time caps are 512 experts per layer and
+128 picks per decode call (`kernels/nv2/nv2_shared.h`). The CPU lane needs 3-bit experts; the B70 tier is
+GLM-5.3-Flash only.
+
 | env | default | what it does |
 |---|---|---|
 | `GLM53_MODE` | `fast` (image default) | `fast`, `exact`, `nvme`, `nvme-exact` |
@@ -357,7 +363,8 @@ These are the settings for the NVMe modes. Defaults are what the entrypoint sets
 | `GLM53_NV_TIMEOUT_S` | 5 | device-side wait limit before the engine reports an error and exits |
 | `GLM53_EC_RESERVE_GB` | 1.5 (1.0) | VRAM left free after the expert cache |
 | `GLM53_EC_MAX_SLOTS` | unset (no cap) | cap on VRAM cache slots; the README command sets 1376 |
-| `GLM53_EC_ELASTIC_GB` / `GLM53_EC_STAGE_GB` / `GLM53_EC_STAGE_MIN` | 10 / 2.6 / 512 | slots lent to prefill / staging buffer size / picks per layer that switch to staged prefill |
+| `GLM53_EC_ELASTIC_GB` / `GLM53_EC_STAGE_GB` / `GLM53_EC_STAGE_MIN` | 10 / 2.6 / 512 | slots lent to prefill / staging buffer size (capped at one layer's experts; `auto` = exactly that) / picks per layer that switch to staged prefill |
+| `GLM53_EC_ADMIT_MAX` | 8 x top-k (64) | largest layer call (in picks) that counts as decode: VRAM admission, CPU lane |
 | `GLM53_MAX_RQ_TOKENS` | 4096 (unset) | page-allocation round per job, not an output cap; lets C2/C4 decode together |
 | `GLM53_PACK_THREADS` / `GLM53_PACK_SAMPLE` | 8 / 300 | `pack-store` threads / records byte-compared against the checkpoint |
 | `GLM53_MODEL_DIR`, `GLM53_MODEL_DOWNLOAD`, `PORT`, `SERVED_NAME`, `GLM53_ARGS` | `/models`, 1, 30000, `glm-5.3-flash`, empty | paths, port, model id, extra server args |

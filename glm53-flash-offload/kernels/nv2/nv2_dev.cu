@@ -103,18 +103,21 @@ __global__ void nv_pub_k(const int64_t* __restrict__ sel, const __half* __restri
 
 // N136: nv_pub_k with the two serial thread-0 scans over E (unique-expert positions, prefetch-hint keys) replaced by
 // warp-ballot compactions (same ascending order, same MAXP cap), the ack wait overlapped with the counting, and the
-// x-row copy issued before the request words. Same request contents bit for bit; 320 threads = 10 warps >= E / 32.
+// x-row copy issued before the request words. Same request contents bit for bit. One expert per thread: the launch
+// has pubf_threads(E) = max(320, E rounded up to a warp) threads (320 = 10 warps for GLM-5.3's 288, 512 for 512).
 constexpr int PUBF_T = 320;
-__global__ __launch_bounds__(PUBF_T) void nv_pub_fast_k(const int64_t* __restrict__ sel, const __half* __restrict__ w,
+constexpr int PUBF_TMAX = ((MAXU + 31) / 32 * 32) > PUBF_T ? ((MAXU + 31) / 32 * 32) : PUBF_T;
+static inline int pubf_threads(int E) { const int t = (E + 31) / 32 * 32; return t > PUBF_T ? t : PUBF_T; }
+__global__ __launch_bounds__(PUBF_TMAX) void nv_pub_fast_k(const int64_t* __restrict__ sel, const __half* __restrict__ w,
     const __half* __restrict__ z, int n, int bsz, int H, int li, int E, int first, const int* __restrict__ slotof, int kind,
     int send_x, volatile long long* hc, Req* req, __half* hx, long long* dc, int* uidx, int* uexp, long long timeout_ns,
     const int64_t* __restrict__ pf, int npf, const int* __restrict__ slotof_next)
 {
     __shared__ int cnt[MAXU];
     __shared__ unsigned char pfm[MAXU];
-    __shared__ int wsum[PUBF_T / 32], wsum2[PUBF_T / 32];
+    __shared__ int wsum[PUBF_TMAX / 32], wsum2[PUBF_TMAX / 32];
     __shared__ long long s_seq;
-    const int t = threadIdx.x, lane = t & 31, wp = t >> 5;
+    const int t = threadIdx.x, lane = t & 31, wp = t >> 5, nw = blockDim.x >> 5;
     const bool do_pf = pf && npf > 0;
     for (int e = t; e < E; e += blockDim.x) { cnt[e] = 0; pfm[e] = 0; }
     if (t == 0)
@@ -150,7 +153,7 @@ __global__ __launch_bounds__(PUBF_T) void nv_pub_fast_k(const int64_t* __restric
         const int nx = bsz * H / 8;
         for (int i = t; i < nx; i += blockDim.x) reinterpret_cast<int4*>(hx)[i] = reinterpret_cast<const int4*>(z)[i];
     }
-    // ballot compaction, one expert per thread (E <= PUBF_T)
+    // ballot compaction, one expert per thread (E <= blockDim.x)
     const int e = t;
     const bool f = e < E && cnt[e] > 0;
     const bool g = do_pf && e < E && pfm[e];
@@ -159,8 +162,7 @@ __global__ __launch_bounds__(PUBF_T) void nv_pub_fast_k(const int64_t* __restric
     if (lane == 0) { wsum[wp] = __popc(bf); wsum2[wp] = __popc(bg); }
     __syncthreads();
     int base = 0, base2 = 0, tot = 0, tot2 = 0;
-    #pragma unroll
-    for (int k = 0; k < PUBF_T / 32; ++k)
+    for (int k = 0; k < nw; ++k)
     {
         if (k < wp) { base += wsum[k]; base2 += wsum2[k]; }
         tot += wsum[k]; tot2 += wsum2[k];
@@ -516,11 +518,11 @@ void nv_pub(at::Tensor sel, at::Tensor w, int64_t z, int64_t n, int64_t bsz, int
 {
     c10::cuda::CUDAGuard g(sel.device());
     TORCH_CHECK(sel.dtype() == at::kLong && sel.is_contiguous() && w.dtype() == at::kHalf && w.is_contiguous());
-    TORCH_CHECK(E <= MAXU);
-    static const int pub_fast = getenv("GLM53_NV_PUBFAST") && atoi(getenv("GLM53_NV_PUBFAST")) == 1 && MAXU <= PUBF_T;
+    TORCH_CHECK(E <= MAXU, "nv_pub: ", E, " experts > MAXU ", MAXU);
+    static const int pub_fast = getenv("GLM53_NV_PUBFAST") && atoi(getenv("GLM53_NV_PUBFAST")) == 1;
     if (pub_fast)
     {
-        nv_pub_fast_k<<<1, PUBF_T, 0, cur(sel)>>>(sel.data_ptr<int64_t>(), (const __half*) w.data_ptr(), (const __half*) z,
+        nv_pub_fast_k<<<1, pubf_threads((int) E), 0, cur(sel)>>>(sel.data_ptr<int64_t>(), (const __half*) w.data_ptr(), (const __half*) z,
             (int) n, (int) bsz, (int) H, (int) li, (int) E, (int) first, slotof_row.data_ptr<int>(), (int) kind,
             (int) send_x, (volatile long long*) hc, (Req*) req, (__half*) hx, (long long*) dc.data_ptr<int64_t>(),
             uidx.data_ptr<int>(), uexp.data_ptr<int>(), timeout_ns, (const int64_t*) pf, (int) npf,

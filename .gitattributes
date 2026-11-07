@@ -1,0 +1,12 @@
+# Engine and setup scripts run inside Linux (WSL or native), so keep LF everywhere except Windows-only launchers.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.gif binary
+*.png binary
+*.jpg binary
+# exllamav3/ and glm53-flash-offload/ stay byte-for-byte as their authors publish them (some of their files use
+# CRLF): no line-ending conversion there.
+exllamav3/** -text
+glm53-flash-offload/** -text

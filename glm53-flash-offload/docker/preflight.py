@@ -81,25 +81,28 @@ def odirect(path):
     return 0
 
 
-def layout():
-    have = sorted(os.sched_getaffinity(0))
-    lane_on = os.environ.get("GLM53_NV_CPU") == "1"
-    keys = [k for k in DEFAULTS if lane_on or k != "GLM53_NV_CPU_CPUS"]
+def layout_vars(env=None, have=None):
+    """The layout as ({VAR: value} for every variable it covers, how it was chosen); ValueError for given CPUs outside
+    the CPU set. env: the environment to read (default os.environ), have: the CPU set (default this process's)."""
+    env = os.environ if env is None else env
+    have = sorted(os.sched_getaffinity(0) if have is None else have)
+    defaults = dict(DEFAULTS, GLM53_MAIN_CPUS=env.get("GLM53_MAIN_DEFAULT") or "24")
+    lane_on = env.get("GLM53_NV_CPU") == "1"
+    keys = [k for k in defaults if lane_on or k != "GLM53_NV_CPU_CPUS"]
     # the main thread is pinned only when it is set, or when the mode pins it by default (GLM53_MAIN_DEFAULT, set by the
     # entrypoint for nvme / nvme-exact when GLM53_MAIN_CPUS is not given at all; an empty value means "do not pin")
-    if not os.environ.get("GLM53_MAIN_CPUS") and not os.environ.get("GLM53_MAIN_DEFAULT"):
+    if not env.get("GLM53_MAIN_CPUS") and not env.get("GLM53_MAIN_DEFAULT"):
         keys.remove("GLM53_MAIN_CPUS")
-    given = {k: os.environ[k] for k in keys if os.environ.get(k)}
+    given = {k: env[k] for k in keys if env.get(k)}
     bad = {k: sorted(set(cpus(v)) - set(have)) for k, v in given.items()}
     bad = {k: v for k, v in bad.items() if v}
     if bad:
-        print(f"[glm53] ERROR: CPUs outside this container's cpuset ({len(have)} CPUs, {spec(have)}): {bad}; set "
-              "GLM53_NV_CPU_CPUS / GLM53_MAIN_CPUS / GLM53_NV_CTL_CPU / GLM53_NV_READER_CPUS inside it, or unset them", file=sys.stderr)
-        return 1
+        raise ValueError(f"CPUs outside this container's cpuset ({len(have)} CPUs, {spec(have)}): {bad}; set "
+                         "GLM53_NV_CPU_CPUS / GLM53_MAIN_CPUS / GLM53_NV_CTL_CPU / GLM53_NV_READER_CPUS inside it, or unset them")
     out = dict(given)
     missing = [k for k in keys if k not in given]
-    if all(set(cpus(DEFAULTS[k])) <= set(have) for k in missing):
-        out.update({k: DEFAULTS[k] for k in missing})
+    if all(set(cpus(defaults[k])) <= set(have) for k in missing):
+        out.update({k: defaults[k] for k in missing})
         how = "measured layout"
     else:
         main, ctl = have[0], have[1 % len(have)]
@@ -108,9 +111,18 @@ def layout():
                    "GLM53_NV_READER_CPUS": spec(rest[-min(14, len(rest)):])}
         out.update({k: derived[k] for k in missing})
         how = f"derived from the container's {len(have)} CPUs (measured layout needs CPUs 2-39)"
-    for k in keys:
-        print(f"export {k}={out[k]}")
-    print(f"[glm53] nv2 CPU layout, {how}: " + ", ".join(f"{k[6:]}={out[k]}" for k in keys), file=sys.stderr)
+    return {k: out[k] for k in keys}, how
+
+
+def layout():
+    try:
+        out, how = layout_vars()
+    except ValueError as e:
+        print(f"[glm53] ERROR: {e}", file=sys.stderr)
+        return 1
+    for k, v in out.items():
+        print(f"export {k}={v}")
+    print(f"[glm53] nv2 CPU layout, {how}: " + ", ".join(f"{k[6:]}={v}" for k, v in out.items()), file=sys.stderr)
     return 0
 
 

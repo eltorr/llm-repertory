@@ -284,6 +284,19 @@ def _manifest():
     return store, man
 
 
+def check_pool_layout(pool, man):
+    """The store's trellis part must be expert_cache.Pool's VRAM slot (gate | up @ off_u | down @ off_d), for the model
+    that was loaded: same matrix sizes, offsets and experts per layer (scripts/pack_glm53_store.py made it from it)."""
+    f = {x["name"]: x["bytes"] for x in man["fields"]}
+    vs = man["vram_slot"]
+    want = (f["gate_proj.trellis"], f["up_proj.trellis"], f["down_proj.trellis"])
+    assert (pool.sg, pool.su, pool.sd) == want, f"expert trellis bytes {(pool.sg, pool.su, pool.sd)} != store {want}: " \
+                                                "the store was packed from another model or quant"
+    assert (pool.rec, pool.off_u, pool.off_d) == (vs["slot_bytes"], vs["off_u"], vs["off_d"]), \
+        (pool.rec, pool.off_u, pool.off_d, vs)
+    assert pool.first == 0 and pool.E == man["experts_per_layer"], (pool.first, pool.E, man["experts_per_layer"])
+
+
 def _rcs_bytes():
     """exllamav3's host-side recurrent-state cache (-rcs / --recurrent_cache_size GB, default 4.0) fills while serving
     (S1b: memcg OOM after it grew); the RAM tier leaves room for it."""
@@ -409,9 +422,8 @@ class NvTier:
         self.store, man = _manifest()
         self.rec_bytes = man["record_bytes"]
         self.slot = man["vram_slot"]["slot_bytes"]
-        assert (pool.sg, pool.su, pool.sd) == (3145728, 3145728, 3145728) and pool.rec == self.slot
-        assert pool.off_u == man["vram_slot"]["off_u"] and pool.off_d == man["vram_slot"]["off_d"]
-        assert pool.first == 0 and pool.E == man["experts_per_layer"]
+        check_pool_layout(pool, man)
+        self.layer0 = man["layers"][0]["model_layer"]
         li_of = {L["key"]: L["li"] for L in man["layers"]}
         self.store_li = [li_of[m.key] for m in pool.mods]
         assert self.store_li == list(range(len(pool.mods))), "pool layer order != store layer order"
@@ -787,7 +799,7 @@ def save_trace(path=None):
     for i, t in enumerate(tr):
         ids[i, :len(t[2])] = t[2]; ws[i, :len(t[3])] = t[3]
     np.savez_compressed(path, step=np.array([t[0] for t in tr], np.int32), layer=np.array([t[1] for t in tr], np.int16),
-                        ids=ids, weights=ws, model_layer_offset=3)
+                        ids=ids, weights=ws, model_layer_offset=nv.layer0)
     return {"rows": len(tr), "path": path}
 
 

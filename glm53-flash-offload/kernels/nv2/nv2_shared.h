@@ -3,10 +3,20 @@
 #pragma once
 #include <cstdint>
 
+// Geometry caps, sized for every supported model (nv2.py checks the loaded model against them, ext().sizes()):
+// GLM-5.3-Flash 288 experts, top-8; Qwen3.8-Flash-Next 512 experts, top-10. Build with -DNV2_MAXU / -DNV2_MAXP to change.
+#ifndef NV2_MAXU
+#define NV2_MAXU 512
+#endif
+#ifndef NV2_MAXP
+#define NV2_MAXP 128
+#endif
+
 namespace nv2s {
 
-constexpr int MAXU = 288;   // unique experts per layer call (E)
-constexpr int MAXP = 64;    // picks with per-pick payload (decode: <= 8 tokens x top-8)
+constexpr int MAXU = NV2_MAXU;   // unique experts per layer call (>= E)
+constexpr int MAXP = NV2_MAXP;   // picks with per-pick payload (>= MAXB tokens x top-k: 64 GLM-5.3, 80 Qwen3.8)
+static_assert(MAXU <= 1024, "nv_step's admission mask holds 1024 experts");
 constexpr int RQ = 64;      // request / reply ring entries
 constexpr int LG = 8192;    // write-back / admission log ring entries
 constexpr int LR = 256;     // landing ring (fresh RAM slots for VRAM victims)

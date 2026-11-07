@@ -626,10 +626,10 @@ inline void fwd4_fn(void* vc, int, int)
                 xp[i] = (U.which ? F.xu : F.xg).data() + size_t(s0 + i) * XH;
                 qs[i] = (U.which ? F.qu : F.qg).data() + size_t(s0 + i) * BH;
             }
-            const int tk = M.k / 16, R = F.rg, C = F.cg;
-            // partials [band][slot][I]
+            const int tk = M.k / 16, tn = M.n / 16, R = F.rg, C = F.cg;
+            // partials [band][slot][I]; the last column unit is narrower when tn is not a multiple of C
             float* y = (U.which ? F.pu : F.pg).data() + (size_t(U.a) * F.ns + s0) * I + size_t(U.b) * C * 16;
-            rect_m(F.kind, J.m, M, U.a * R, std::min(R, tk - U.a * R), U.b * C, C, xp, qs, y, I);
+            rect_m(F.kind, J.m, M, U.a * R, std::min(R, tk - U.a * R), U.b * C, std::min(C, tn - U.b * C), xp, qs, y, I);
             F.c_gu[U.j].v.fetch_add(1, std::memory_order_release);
         }
         else if (U.kind == U_ACT)
@@ -673,9 +673,9 @@ inline void fwd4_fn(void* vc, int, int)
             spin_until(F.c_act[U.j].v, BI);
             const void* xp[MAXM]; const float* qs[MAXM];
             for (int i = 0; i < J.m; ++i) { xp[i] = F.xd.data() + size_t(s0 + i) * XI; qs[i] = F.qd.data() + size_t(s0 + i) * BI; }
-            const int tk = E.d.k / 16, R = F.rd, C = F.cd;
+            const int tk = E.d.k / 16, tn = E.d.n / 16, R = F.rd, C = F.cd;
             float* y = F.pd.data() + (size_t(U.a) * F.ns + s0) * H + size_t(U.b) * C * 16;
-            rect_m(F.kind, J.m, E.d, U.a * R, std::min(R, tk - U.a * R), U.b * C, C, xp, qs, y, H);
+            rect_m(F.kind, J.m, E.d, U.a * R, std::min(R, tk - U.a * R), U.b * C, std::min(C, tn - U.b * C), xp, qs, y, H);
             F.c_down[U.j].v.fetch_add(1, std::memory_order_release);
         }
         else

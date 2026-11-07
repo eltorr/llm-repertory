@@ -48,12 +48,15 @@ void dev_bind(pybind11::module& m);
 
 namespace nv2h {
 
-// N137 B70 ring layout (b70/ring.py): HDR int64[512] | KEYS int32[16384] | REQ | X fp16[MAXP][H] | OUT fp16[MAXP][H]
+// N137 B70 ring layout (b70tier/ring.py, its own fixed geometry: picks B70_MAXP, row width B70_H, independent of this
+// engine's MAXP): HDR int64[512] | KEYS int32[16384] | REQ | X fp16[B70_MAXP][B70_H] | OUT fp16[B70_MAXP][B70_H]
 constexpr int64_t B70_MAGIC = 0x4E31333752494E47LL;
-constexpr int64_t B70_OFF_KEYS = 4096, B70_OFF_REQ = 69632, B70_OFF_X = 73728, B70_OFF_OUT = 73728 + 64LL * 4096 * 2;
-constexpr int64_t B70_SIZE = ((B70_OFF_OUT + 64LL * 4096 * 2 + 4095) / 4096) * 4096;
-enum { B70_W_MAGIC = 0, B70_W_STATE = 4, B70_W_LOAD_SEQ = 6, B70_W_LOAD_ACK = 7, B70_W_NKEYS = 8, B70_W_REQ_SEQ = 9,
-       B70_W_DONE_SEQ = 10, B70_W_ERR = 11, B70_W_NSLOTS = 18, B70_W_HEARTBEAT = 19 };
+constexpr int B70_MAXP = 64, B70_H = 4096;
+static_assert(B70_MAXP <= MAXP, "B70 picks come from one request");
+constexpr int64_t B70_OFF_KEYS = 4096, B70_OFF_REQ = 69632, B70_OFF_X = 73728, B70_OFF_OUT = B70_OFF_X + int64_t(B70_MAXP) * B70_H * 2;
+constexpr int64_t B70_SIZE = ((B70_OFF_OUT + int64_t(B70_MAXP) * B70_H * 2 + 4095) / 4096) * 4096;
+enum { B70_W_MAGIC = 0, B70_W_H = 2, B70_W_E = 3, B70_W_STATE = 4, B70_W_LOAD_SEQ = 6, B70_W_LOAD_ACK = 7, B70_W_NKEYS = 8,
+       B70_W_REQ_SEQ = 9, B70_W_DONE_SEQ = 10, B70_W_ERR = 11, B70_W_NSLOTS = 18, B70_W_HEARTBEAT = 19 };
 
 static inline long long realtime_ns() { struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts); return (long long) ts.tv_sec * 1000000000LL + ts.tv_nsec; }
 static inline double now_ms() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
@@ -155,8 +158,8 @@ struct StageEntry { int li; int j; int key; int ring; std::atomic<int> ready{0};
 
 struct Engine
 {
-    // geometry
-    int L = 0, E = 0, K = 0, H = 4096, I = 2048;
+    // geometry (set by init from the model: layers, experts per layer, hidden and expert intermediate size)
+    int L = 0, E = 0, K = 0, H = 0, I = 0;
     int64_t rec_bytes = 0, slot_bytes = 0, piece = 0, off_u = 0, off_d = 0;
     int fd = -1;
     int64_t ph = 0;
@@ -426,7 +429,7 @@ struct Engine
         const bool cpu = dec && pol.cpu_on && cpu_ready && r.np <= MAXP && r.ntok <= MAXB;
         V.clear(); Rm.clear(); N.clear();
         int nnv = 0, nb70 = 0;
-        const bool b70 = dec && b70_on && cpu_ready && r.np <= MAXP && r.ntok <= MAXB;   // independent of the CPU lane switch
+        const bool b70 = dec && b70_on && cpu_ready && r.np <= B70_MAXP && r.ntok <= MAXB;   // independent of the CPU lane switch
         for (int u = 0; u < r.nu; ++u)
         {
             const int key = r.key[u];
@@ -583,7 +586,7 @@ struct Engine
             for (int k = 0; k < np; ++k)
                 if (cj.lane[k] == LN_B70)
                 {
-                    rq[4 + nb] = cj.e[k]; ((float*) rq)[4 + MAXP + nb] = cj.w[k]; rq[4 + 2 * MAXP + nb] = cj.t[k];
+                    rq[4 + nb] = cj.e[k]; ((float*) rq)[4 + B70_MAXP + nb] = cj.w[k]; rq[4 + 2 * B70_MAXP + nb] = cj.t[k];
                     std::memcpy(bx + size_t(nb) * H, hx + size_t(cj.t[k]) * H, size_t(H) * 2);
                     btok[nb++] = cj.t[k];
                 }
@@ -1076,6 +1079,9 @@ void reset_counters() { Counters& c = G->C; c.~Counters(); new (&c) Counters(); 
 void cpu_init(int64_t threads, std::vector<int64_t> cpus, int64_t mode, double act_limit)
 {
     Engine& e = *G;
+    // the AVX2 kernels work in 128-wide blocks; ft_core's output accumulate in 512-column units
+    TORCH_CHECK(e.H % 512 == 0 && e.I % 128 == 0, "nv2 CPU tier: hidden size ", e.H, " / intermediate size ", e.I,
+                " not supported (needs H % 512 == 0, I % 128 == 0)");
     init_perm(); init_tables(); cpu_kern_init();
     std::vector<int> c(cpus.begin(), cpus.end());
     cpu_set_t saved; sched_getaffinity(0, sizeof(saved), &saved);
@@ -1164,6 +1170,8 @@ int64_t b70_attach(std::string path, at::Tensor keys, double load_timeout_s)
     e.b70r = (uint8_t*) p;
     volatile int64_t* h = e.b70h();
     TORCH_CHECK(h[B70_W_MAGIC] == B70_MAGIC, "b70: bad ring magic");
+    TORCH_CHECK(e.H == B70_H && h[B70_W_H] == e.H && h[B70_W_E] == e.E, "b70: the ring is for hidden size ",
+                (long long) h[B70_W_H], " and ", (long long) h[B70_W_E], " experts; this model has ", e.H, " and ", e.E);
     const int n = int(keys.numel());
     TORCH_CHECK(n <= 16384, "b70: too many keys");
     int32_t* kk = (int32_t*) (e.b70r + B70_OFF_KEYS);
@@ -1192,16 +1200,16 @@ at::Tensor b70_forward(int64_t li, at::Tensor x, at::Tensor sel, at::Tensor w)
     Engine& e = *G;
     TORCH_CHECK(e.b70r, "b70: not attached");
     const int m = int(x.size(0)), k = int(sel.size(1));
-    TORCH_CHECK(m * k <= MAXP, "b70_forward: too many picks");
+    TORCH_CHECK(m * k <= B70_MAXP, "b70_forward: too many picks");
     auto sa = sel.accessor<int32_t, 2>(); auto wa = w.accessor<float, 2>(); auto xa = x.accessor<float, 2>();
     int32_t* rq = (int32_t*) (e.b70r + B70_OFF_REQ);
     uint16_t* bx = (uint16_t*) (e.b70r + B70_OFF_X);
-    int nb = 0; int btok[MAXP];
+    int nb = 0; int btok[B70_MAXP];
     for (int t = 0; t < m; ++t)
         for (int j = 0; j < k; ++j)
         {
             TORCH_CHECK(e.b70k[li * e.E + sa[t][j]], "b70_forward: expert not B70-resident");
-            rq[4 + nb] = sa[t][j]; ((float*) rq)[4 + MAXP + nb] = wa[t][j]; rq[4 + 2 * MAXP + nb] = t;
+            rq[4 + nb] = sa[t][j]; ((float*) rq)[4 + B70_MAXP + nb] = wa[t][j]; rq[4 + 2 * B70_MAXP + nb] = t;
             for (int c = 0; c < e.H; ++c) bx[size_t(nb) * e.H + c] = f2h(xa[t][c]);
             btok[nb++] = t;
         }
