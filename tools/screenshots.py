@@ -25,8 +25,10 @@ sys.path.insert(0, str(REPO))
 PORT_EXAMPLE = 8080
 # installed Chromium browsers Playwright can drive when its own isn't downloaded (playwright install chromium)
 BROWSERS = ["%ProgramFiles%/BraveSoftware/Brave-Browser/Application/brave.exe",
-            "%ProgramFiles%/Google/Chrome/Application/chrome.exe", "%LOCALAPPDATA%/Google/Chrome/Application/chrome.exe",
-            "%ProgramFiles(x86)%/Microsoft/Edge/Application/msedge.exe", "%ProgramFiles%/Microsoft/Edge/Application/msedge.exe",
+            "%ProgramFiles%/Google/Chrome/Application/chrome.exe",
+            "%LOCALAPPDATA%/Google/Chrome/Application/chrome.exe",
+            "%ProgramFiles(x86)%/Microsoft/Edge/Application/msedge.exe",
+            "%ProgramFiles%/Microsoft/Edge/Application/msedge.exe",
             "/usr/bin/brave-browser", "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/microsoft-edge"]
 
 
