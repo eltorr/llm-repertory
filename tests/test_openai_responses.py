@@ -96,6 +96,9 @@ class OutputTests(unittest.TestCase):
         self.assertEqual(r["output"][1]["content"][0]["text"], "answer")
         self.assertEqual((r["output"][2]["call_id"], r["output"][2]["name"]), ("call_1", "get_weather"))
         self.assertEqual((r["status"], r["usage"]["input_tokens"], r["usage"]["output_tokens"]), ("completed", 7, 5))
+        self.assertEqual(r["usage"]["input_tokens_details"], {"cached_tokens": 0, "cache_write_tokens": 0})
+        hit = R.ResponseBuilder({"input": "x"}, "m", []).whole(None, "answer", [], "stop", 700, 5, 512)
+        self.assertEqual(hit["usage"]["input_tokens_details"]["cached_tokens"], 512)
         cut = R.ResponseBuilder({"input": "x"}, "m", []).whole("thin", "", [], "length", 7, 5)
         self.assertEqual((cut["status"], cut["incomplete_details"]), ("incomplete", {"reason": "max_output_tokens"}))
 
@@ -104,7 +107,7 @@ class OutputTests(unittest.TestCase):
         sse = b.start()
         for ev in [("reasoning", "Let me "), ("reasoning", "think."), ("content", "Hel"), ("content", "lo"),
                    ("tool_calls", [CALL]), ("end", "tool_calls", 9)]:
-            sse += b.feed(ev, 4)
+            sse += b.feed(ev, 4, 2)
         ev = events(sse)
         self.assertEqual([e["sequence_number"] for e in ev], list(range(len(ev))))
         self.assertEqual([e["type"] for e in ev], [
@@ -121,7 +124,8 @@ class OutputTests(unittest.TestCase):
         done = ev[-1]["response"]
         self.assertEqual([o["type"] for o in done["output"]], ["reasoning", "message", "function_call"])
         self.assertEqual(done["output"][1]["content"][0]["text"], "Hello")
-        self.assertEqual(done["usage"]["output_tokens"], 9)
+        self.assertEqual((done["usage"]["output_tokens"], done["usage"]["input_tokens_details"]["cached_tokens"]),
+                         (9, 2))
         # output_index points at the item each event belongs to
         self.assertEqual({e["output_index"] for e in ev if e["type"] == "response.output_text.delta"}, {1})
         # the manager reads usage from the stream's tail: it must come after the output

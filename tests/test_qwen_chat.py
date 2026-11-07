@@ -1,12 +1,16 @@
-"""The model's chat format (engines/exl3_offload/qwen_chat.py): tool calls, answers split as they stream, sampling
-values and the template. No model: the text is written here."""
+"""The model's chat format (engines/exl3_offload/qwen_chat.py): tool calls, sampling values and the template, and its
+answers through the engine's splitter (glm53/stream_split.py) as the engine runs them. No model: the text is written
+here."""
 import json
 import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engines" / "exl3_offload"))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "engines" / "exl3_offload"))
+sys.path.insert(0, str(ROOT / "glm53-flash-offload" / "glm53"))
 import qwen_chat as Q  # noqa: E402
+import stream_split  # noqa: E402
 
 WEATHER = {"type": "function", "function": {"name": "get_weather", "parameters": {
     "type": "object", "properties": {"city": {"type": "string"}, "days": {"type": "integer"},
@@ -66,9 +70,15 @@ class ToolCallTests(unittest.TestCase):
 
 
 class StreamTests(unittest.TestCase):
+    """Qwen3.8's answers through the engine's splitter, its tool calls parsed at the end (serve.py's turn_events)."""
+
     def run_stream(self, pieces, thinking=False, tools=TOOLS):
-        s = Q.AnswerStream(thinking, tools)
+        s = stream_split.StreamSplit(thinking, bool(tools))
         events = [e for p in pieces for e in s.feed(p)] + s.finish()
+        if tools and s.tool_text:
+            rest, calls = Q.parse_tool_calls(s.tool_text, tools)
+            events += [("content", rest)] if rest else []
+            events += [("tool_calls", calls)] if calls else []
         joined = {k: "".join(v for kind, v in events if kind == k) for k in ("reasoning", "content")}
         calls = [c for kind, v in events if kind == "tool_calls" for c in v]
         return events, joined, calls
@@ -118,17 +128,28 @@ class StreamTests(unittest.TestCase):
         _, joined, calls = self.run_stream(["a ", CALL], tools=None)
         self.assertEqual((joined["content"], calls), ("a " + CALL, []))
 
+    def test_a_call_that_does_not_parse_is_shown_as_written(self):
+        _, joined, calls = self.run_stream(["Here: ", "<tool_call>not a function</tool_call>"])
+        self.assertEqual((joined["content"], calls), ("Here: <tool_call>not a function</tool_call>", []))
+
 
 class WholeAnswerTests(unittest.TestCase):
+    """A finished answer, as serve.py's turn_answer splits it."""
+
+    @staticmethod
+    def whole(text, thinking, tools):
+        reasoning, content = stream_split.split_answer(text, thinking)
+        return (reasoning, *Q.parse_tool_calls(content, tools))
+
     def test_reasoning_content_and_calls(self):
-        reasoning, content, calls = Q.whole_answer("Think.</think>\n\nSure.\n" + CALL, True, TOOLS)
+        reasoning, content, calls = self.whole("Think.</think>\n\nSure.\n" + CALL, True, TOOLS)
         self.assertEqual((reasoning, content, len(calls)), ("Think.", "Sure.", 1))
 
     def test_a_think_block_never_closed_is_all_reasoning(self):
-        self.assertEqual(Q.whole_answer("<think>Still thinking", True, None), ("Still thinking", "", []))
+        self.assertEqual(self.whole("<think>Still thinking", True, None), ("Still thinking", "", []))
 
     def test_thinking_off(self):
-        self.assertEqual(Q.whole_answer("  Plain.  ", False, None), (None, "Plain.", []))
+        self.assertEqual(self.whole("  Plain.  ", False, None), (None, "Plain.", []))
 
 
 class SamplingTests(unittest.TestCase):

@@ -1,11 +1,14 @@
-"""Split a chat answer into reasoning, content and tool calls while it streams (serve.py's chat endpoint).
+"""Split an answer into reasoning, content and tool calls while it streams (serve.py's answer pipeline, behind both
+/v1/responses and /v1/chat/completions); split_answer is the same for a whole answer.
 
 Tag-aware hold-back: text that could still turn into a tag is not sent until later text shows it does not.
   - reasoning: everything up to the closing think tag (opening tags removed); a partial closing tag is held back
-  - content: sent as it comes; with tools, a partial tool-call tag at the end of the text is held back, and from the
-    first complete tool-call tag on everything is kept (tool_text) for the caller's parser at the end of the answer,
-    so a tool call never reaches the client as plain text
-  - an answer whose prompt did not open a think block may open one itself as its first output
+  - content: sent as it comes and as written (the blank lines after the think block included); with tools, a partial
+    tool-call tag at the end of the text is held back, and from the first complete tool-call tag on everything is
+    kept (tool_text) for the caller's parser at the end of the answer, so a tool call never reaches the client as
+    plain text
+  - an answer whose prompt did not open a think block may open one itself as its first output (blank lines before it
+    are held until that is known); once a think block has closed, no other opens
 Pure Python (no torch); the tags are parameters (serve.py passes its THINK_OPEN, THINK_CLOSE, TOOL_OPEN).
 
     s = StreamSplit(in_think=prompt_opens_think(prompt), tools=bool(tools))
@@ -55,7 +58,7 @@ class StreamSplit:
         self.think_open, self.think_close, self.tool_open = think_open, think_close, tool_open
         self.buf = ""            # received, not sent yet
         self.tool_text = ""      # from the first tool-call tag on
-        self.started = False     # content has begun: leading blank lines dropped, no think block can open any more
+        self.started = False     # content has begun or a think block closed: no think block can open any more
 
     def feed(self, text):
         out = []
@@ -69,7 +72,7 @@ class StreamSplit:
                 if i >= 0:
                     self._emit(out, "reasoning", self.buf[:i])
                     self.buf = self.buf[i + len(self.think_close):]
-                    self.reasoning = False
+                    self.reasoning, self.started = False, True
                     continue
                 k = held(self.buf, (self.think_close, self.think_open))
                 self._emit(out, "reasoning", self.buf[:len(self.buf) - k])
@@ -84,7 +87,7 @@ class StreamSplit:
                         self.buf = s[len(self.think_open):]
                         self.reasoning = True
                         continue
-                    self.buf, self.started = s, True
+                    self.started = True             # content, its leading blank lines included
                 if self.tools:
                     i = self.buf.find(self.tool_open)
                     if i >= 0:
@@ -101,10 +104,7 @@ class StreamSplit:
         """End of the answer: what was held back was no tag after all."""
         out = []
         if self.buf and not self.tool_text:
-            if self.reasoning:
-                self._emit(out, "reasoning", self.buf)
-            else:
-                self._emit(out, "content", self.buf if self.started else self.buf.lstrip())
+            self._emit(out, "reasoning" if self.reasoning else "content", self.buf)
         self.buf = ""
         return out
 

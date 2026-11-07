@@ -34,12 +34,17 @@ offers; an entry is only offered once it has passed curation (compatibility and 
   - the manager ([repertory/](../repertory)) decides when to scale. It is Python, which is fine: it is idle most of
     the time.
 - **Shared inside the engine:** its load sequence (`glm53/offload_stack.py`) serves both the loader and the engine's
-  own server, and the Responses API and request clean-up (`openai_responses.py`, `openai_compat.py`) live there too.
+  own server, and the engine's server answers the API for any model (`glm53/serve.py`):
+  - one pipeline: a request becomes a turn (prompt, tools, sampling), the turn's answer streams as reasoning, content
+    and tool calls (`stream_split.py`), and a formatter writes it out: the Responses API first
+    (`openai_responses.py`), Chat Completions on the same turn for compatibility;
+  - the checks every model gets: a prompt that fills the context is refused before it runs, a request that isn't
+    one or that the chat template refuses is a 400, and usage reports the prompt tokens the prefix cache served;
+  - the model's own parts are hooks a model server sets: the chat template, the tool-call parser, sampling defaults,
+    stop tokens and the tags. The model server sets Qwen's (`qwen_chat.py`) and adds only Repertory's routes.
 
 ## Open
 
-- The engine and the model server both have chat and Responses routes, and the model server's replace the engine's.
-  They should become one.
 - Nothing has moved out of Python yet; the plan is to measure first. Native code would pay off:
   - in the per-token loop, if profiling shows Python costing real time there;
   - in the network handoff of a split across PCs ([notes](research/cross-pc-split.md)), which belongs in C++ from

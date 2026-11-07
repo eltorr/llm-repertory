@@ -18,7 +18,7 @@ models on a PC that is also used for other things, with one adapter per engine.
   - `exllamav3/` and `glm53-flash-offload/`: the engine as published upstream, under their own MIT licenses.
   - `setup/`, `bin/`, `tools/`, `docs/`, `research/` and `tests/`.
 - **The model server** (`engines/exl3_offload/server.py`) serves Qwen3.8-Flash-Next through the engine's own app,
-  with Repertory's chat layer on top: the model's chat template in Jinja's sandbox, its tool calls as OpenAI
+  with the model's chat format in the engine's hooks: its chat template in Jinja's sandbox, its tool calls as OpenAI
   `tool_calls`, prose that streams even when tools are offered, OpenAI's reasoning levels, the Responses API, and
   the model's sampling values where a request leaves them out. New: a prompt that fills the context gets a 400 with
   `context_length_exceeded`, and chat usage reports the tokens reused from the prefix cache
@@ -47,4 +47,11 @@ models on a PC that is also used for other things, with one adapter per engine.
   offers Qwen so far. What runs compiled and what in Python, and what is still open.
 - **The model server uses this checkout's ExLlamaV3** (`run.sh` puts it first on `PYTHONPATH`), even with a
   Python environment that has another copy installed.
+- **One implementation of the API:** the engine's server (`glm53/serve.py`) answers `/v1/responses`, the main API,
+  and `/v1/chat/completions` on one pipeline and one streaming splitter; the model server only sets Qwen's hooks
+  (template, tool calls, sampling, stop tokens) and no longer replaces the engine's routes. The context check, the
+  400s in OpenAI's shape and the prefix-cache figures moved into the engine, for every model. Responses usage now
+  reports `input_tokens_details.cached_tokens`, and `/v1/completions` and `/generate` refuse a prompt that fills the
+  context with the same 400 (it was FastAPI's error shape, or a stream cut off). Chat Completions answers are
+  unchanged.
 - **License:** MIT for Repertory's own code.

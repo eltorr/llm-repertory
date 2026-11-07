@@ -13,11 +13,16 @@ Offload stack (each piece is a monkeypatch around stock exllamav3, enabled by en
 
 Endpoints
   GET  /health, /v1/models, /server_info, /stats
-  POST /v1/chat/completions  (stream or not; tools -> tool_calls; chat_template_kwargs.enable_thinking /
-                             reasoning_effort; reasoning in reasoning_content)
+  POST /v1/responses         (OpenAI Responses API, stream or not: reasoning items, function tools -> function_call
+                             items, reasoning.effort, previous_response_id; openai_responses.py)
+  POST /v1/chat/completions  (Chat Completions on the same pipeline, stream or not; tools -> tool_calls;
+                             chat_template_kwargs.enable_thinking / reasoning_effort; reasoning in reasoning_content)
   POST /v1/completions       (raw prompt, stream or not)
   POST /generate, /tokenize  (SGLang-shaped, used by the benchmark and quality tools; return_logprob = teacher-forced)
-No output caps: max_tokens defaults to the remaining context.
+No output caps: max_tokens defaults to the remaining context. A prompt that leaves no room for an answer is refused
+before it runs (HTTP 400, code context_length_exceeded), and so is a body that is not a request or a conversation the
+chat template refuses (chat_prompt raising ValueError), all in OpenAI's error shape. Usage reports the prompt tokens
+the prefix cache served (cached_tokens).
 
   python3 glm53/serve.py -m /models -cs 131072 --max-batch-size 8 -chunk_size 8192 -ambs 4 --host 0.0.0.0 --port 30000
 
@@ -26,7 +31,7 @@ globals load() sets (args, model, config, cache, tok, draft_model, draft_cache, 
 what is model-specific: chat_prompt, parse_tool_calls, openai_sp, startup, run_job, AsyncJob, and the tags THINK_OPEN,
 THINK_CLOSE, TOOL_OPEN. Everything here looks them up when a request comes in, so assignments take effect.
 """
-import argparse, asyncio, json, os, re, sys, time, uuid
+import argparse, asyncio, contextvars, json, os, re, sys, time, uuid
 import torch
 from exllamav3 import model_init
 from exllamav3.generator import AsyncGenerator, AsyncJob
@@ -190,16 +195,50 @@ def ids_of(body):
     return tok.encode(body["text"], encode_special_tokens=True)
 
 
+class ContextFull(ValueError):
+    """The prompt fills the context: no room is left for an answer (HTTP 400)."""
+    code = "context_length_exceeded"
+
+    def __init__(self, prompt_tokens, context):
+        super().__init__(f"the prompt has {prompt_tokens:,} tokens and this server's context holds {context:,}, which "
+                         f"leaves no room for an answer: shorten the conversation")
+
+
+def answer_room(prompt_tokens):
+    """Tokens an answer may still take: the context after the prompt, the drafts' share (8 when there are none) and 2
+    spare."""
+    return CTX - prompt_tokens - (args.num_draft_tokens or 8) - 2
+
+
+def check_room(ids):
+    """The room an answer to `ids` has; ContextFull when there is none. Routes call it before they answer (a stream
+    can't turn into an error once it has started), and run_job again for any other caller."""
+    room = answer_room(ids.shape[-1])
+    if room < 1:
+        raise ContextFull(ids.shape[-1], CTX)
+    return room
+
+
+CACHED = contextvars.ContextVar("cached_tokens", default=0)   # set by run_job, in the request's own context
+
+
+def cached_tokens():
+    """How many of the last job's prompt tokens the prefix cache served (run_job sets it when the answer ends)."""
+    return CACHED.get()
+
+
 async def run_job(ids, sp, stop_strings=None):
-    """Yields (text so far, completion tokens, finish or None) once per generator step."""
+    """Yields (text so far, completion tokens, finish or None) once per generator step. ContextFull before anything
+    runs when the prompt leaves no room for an answer; when it ends, cached_tokens() has its prefix-cache hits."""
     gen = G["gen"]
+    room = check_room(ids)
     max_new = sp.get("max_new_tokens")
-    room = CTX - ids.shape[-1] - (args.num_draft_tokens or 8) - 2
     max_new = room if max_new is None else min(int(max_new), room)
     # N119: GLM53_MAX_RQ_TOKENS = page-allocation round per job (exllamav3 max_rq_tokens: the job requeues itself after
     # that many tokens and keeps going; NOT an output cap). Without it every job reserves pages for the whole remaining
     # context, so a second concurrent job never starts and C2/C4 run one stream after another.
     rq = int(os.environ.get("GLM53_MAX_RQ_TOKENS", "0")) or None
+    CACHED.set(0)
     job = AsyncJob(gen, input_ids=ids, max_new_tokens=max(1, max_new), sampler=make_sampler(sp),
                    stop_conditions=list(EOS) + list(stop_strings or []), decode_special_tokens=False,
                    **({"max_rq_tokens": rq} if rq else {}))
@@ -218,6 +257,8 @@ async def run_job(ids, sp, stop_strings=None):
                 # exllamav3's new_tokens restarts at every max_rq_tokens requeue (GLM53_MAX_RQ_TOKENS), so for answers longer
                 # than one page round it under-reports; the streamed count n covers the whole answer
                 n = max(n, int(r.get("new_tokens", 0)))
+                # whole KV pages and the matched part of the next, counted from the first round across requeues
+                CACHED.set(int(r.get("cached_tokens") or 0))
                 reason = r.get("eos_reason")
                 fin = {"type": "length" if reason == "max_new_tokens" else "stop", "reason": str(reason)}
                 G["stats"]["completion_tokens"] += n
@@ -292,6 +333,7 @@ async def generate(req: Request):
                                   "output_token_ids_logprobs")}
         meta.update({"prompt_tokens": ids.shape[-1], "completion_tokens": 1, "finish_reason": {"type": "length"}})
         return JSONResponse({"text": "", "output_ids": [r["next_token"]], "meta_info": meta})
+    check_room(ids)
     P = ids.shape[-1]
     if body.get("stream"):
         async def events():
@@ -320,6 +362,10 @@ async def tokenize(req: Request):
 
 
 # ---- OpenAI-compatible endpoints ----------------------------------------------------------------------------------
+# One pipeline behind both APIs: request_body -> prepare_turn (a chat-shaped request as the model runs it) ->
+# turn_events (streamed) or turn_answer (whole) -> a formatter. The Responses API (openai_responses.py translates its
+# requests into the chat shape and builds its output) is the main one; Chat Completions formats the same turn for the
+# many clients that speak it.
 
 def openai_sp(body):
     return {"temperature": body.get("temperature", 1.0), "top_p": body.get("top_p", 1.0), "top_k": body.get("top_k"),
@@ -331,29 +377,48 @@ def stops_of(body):
     return [s] if isinstance(s, str) else list(s or [])
 
 
-def split_reasoning(text):
-    """GLM-5.3 thinks inside <think>...</think>; the prompt already opened the block."""
-    if "</think>" in text:
-        r, c = text.split("</think>", 1)
-        return r.replace("<think>", "").strip(), c.strip()
-    return None, text.strip()
+def request_error(e):
+    """OpenAI's 400 for a request this server can't run: the ValueError preparing it raised (RequestError for the body,
+    a template's refusal, ContextFull with its code)."""
+    return JSONResponse({"error": {"message": str(e), "type": "invalid_request_error", "param": None,
+                                   "code": getattr(e, "code", None)}}, status_code=400)
 
 
-def prepare_chat(body):
-    """Prompt and generation settings for an OpenAI chat request (also behind /v1/responses)."""
+@app.exception_handler(ContextFull)
+async def _context_full(req, e):
+    return request_error(e)   # run_job's own check, for a caller that did not check first
+
+
+async def request_body(req, needs):
+    """The request's JSON object; RequestError (a 400) for anything else, or for an object without `needs`."""
+    try:
+        body = await req.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict) or needs not in body:
+        raise RequestError(f"expected a JSON object with {needs}")
+    return body
+
+
+def prepare_turn(body):
+    """A chat-shaped request (a Responses one after responses_to_chat, or Chat Completions as sent) as the model runs
+    it: the prompt's ids, tools, sampling, stops. ValueError for one it can't: chat_prompt may raise one (a template
+    that refuses the conversation), and ContextFull when the prompt leaves no room for an answer."""
     body = normalize_chat_request(body)
     kw = dict(body.get("chat_template_kwargs") or {})
     if body.get("reasoning_effort") is not None:
         kw.setdefault("reasoning_effort", body["reasoning_effort"])
-    thinking = kw.get("enable_thinking", True)
+    thinking = bool(kw.get("enable_thinking", True))
     tools = body.get("tools") if body.get("tool_choice") != "none" else None
     prompt = chat_prompt(body["messages"], thinking, tools, kw)
-    return {"body": body, "tools": tools, "ids": tok.encode(prompt, encode_special_tokens=True),
+    ids = tok.encode(prompt, encode_special_tokens=True)
+    check_room(ids)
+    return {"body": body, "tools": tools, "ids": ids,
             "in_think": stream_split.prompt_opens_think(prompt, THINK_OPEN, THINK_CLOSE),   # the answer starts as reasoning
             "sp": openai_sp(body), "stops": stops_of(body)}
 
 
-async def chat_events(req, c):
+async def turn_events(req, c):
     """A streamed answer as events: ("reasoning", text) and ("content", text) as they arrive, then ("tool_calls",
     calls) if it called tools, and last ("end", finish_reason, completion_tokens)."""
     g = run_job(c["ids"], c["sp"], c["stops"])
@@ -384,7 +449,7 @@ async def chat_events(req, c):
         await g.aclose()
 
 
-async def chat_answer(c):
+async def turn_answer(c):
     """The whole answer: (reasoning, content, tool calls, finish_reason, completion_tokens)."""
     text, n, fin = "", 0, None
     async for text, n, fin in run_job(c["ids"], c["sp"], c["stops"]):
@@ -395,9 +460,46 @@ async def chat_answer(c):
     return reasoning, content, calls, "tool_calls" if calls else (fin or {}).get("type"), n
 
 
+@app.post("/v1/responses")
+async def responses(req: Request):
+    """OpenAI's Responses API: the request as a chat-shaped turn, the answer as Responses output
+    (openai_responses.py)."""
+    try:
+        raw = await request_body(req, "input")
+        chat_body, convo = responses_to_chat(raw)
+        c = prepare_turn(chat_body)
+    except ValueError as e:   # RequestError, a template's refusal, ContextFull
+        return request_error(e)
+    P = c["ids"].shape[-1]
+    rb = ResponseBuilder(raw, args.served_name, convo)
+    if raw.get("stream"):
+        async def events():
+            for e in rb.start():
+                yield e
+            evs = turn_events(req, c)
+            try:
+                async for ev in evs:
+                    for e in rb.feed(ev, P, cached_tokens()):
+                        yield e
+            finally:
+                await evs.aclose()
+        return StreamingResponse(events(), media_type="text/event-stream")
+    reasoning, content, calls, reason, n = await turn_answer(c)
+    return JSONResponse(rb.whole(reasoning, content, calls, reason, P, n, cached_tokens()))
+
+
+def chat_usage(P, n):
+    return {"prompt_tokens": P, "completion_tokens": n, "total_tokens": P + n,
+            "prompt_tokens_details": {"cached_tokens": cached_tokens()}}
+
+
 @app.post("/v1/chat/completions")
 async def chat(req: Request):
-    c = prepare_chat(await req.json())
+    """Chat Completions: the same turn as chat.completion objects, or chat.completion.chunk events."""
+    try:
+        c = prepare_turn(await request_body(req, "messages"))
+    except ValueError as e:   # RequestError, a template's refusal, ContextFull
+        return request_error(e)
     cid, created, P = "chatcmpl-" + uuid.uuid4().hex[:24], int(time.time()), c["ids"].shape[-1]
     if c["body"].get("stream"):
         async def events():
@@ -405,12 +507,12 @@ async def chat(req: Request):
             delta = lambda d: sse(dict(base, choices=[{"index": 0, "delta": d, "finish_reason": None}]))
             key = {"reasoning": "reasoning_content", "content": "content"}
             yield delta({"role": "assistant", "content": ""})
-            evs = chat_events(req, c)
+            evs = turn_events(req, c)
             try:
                 async for ev in evs:
                     if ev[0] == "end":
-                        usage = {"prompt_tokens": P, "completion_tokens": ev[2], "total_tokens": P + ev[2]}
-                        yield sse(dict(base, choices=[{"index": 0, "delta": {}, "finish_reason": ev[1]}], usage=usage))
+                        yield sse(dict(base, choices=[{"index": 0, "delta": {}, "finish_reason": ev[1]}],
+                                       usage=chat_usage(P, ev[2])))
                         yield "data: [DONE]\n\n"
                     elif ev[0] == "tool_calls":
                         yield delta({"tool_calls": [dict(t, index=i) for i, t in enumerate(ev[1])]})
@@ -419,41 +521,13 @@ async def chat(req: Request):
             finally:
                 await evs.aclose()
         return StreamingResponse(events(), media_type="text/event-stream")
-    reasoning, content, calls, reason, n = await chat_answer(c)
+    reasoning, content, calls, reason, n = await turn_answer(c)
     msg = {"role": "assistant", "content": content, "reasoning_content": reasoning}
     if calls:
         msg["tool_calls"] = calls
     return JSONResponse({"id": cid, "object": "chat.completion", "created": created, "model": args.served_name,
                          "choices": [{"index": 0, "message": msg, "finish_reason": reason}],
-                         "usage": {"prompt_tokens": P, "completion_tokens": n, "total_tokens": P + n}})
-
-
-@app.post("/v1/responses")
-async def responses(req: Request):
-    """OpenAI Responses API, translated onto the chat pipeline (openai_responses.py)."""
-    raw = await req.json()
-    try:
-        chat_body, convo = responses_to_chat(raw)
-    except RequestError as e:
-        return JSONResponse({"error": {"message": str(e), "type": "invalid_request_error", "param": None,
-                                       "code": None}}, status_code=400)
-    c = prepare_chat(chat_body)
-    P = c["ids"].shape[-1]
-    rb = ResponseBuilder(raw, args.served_name, convo)
-    if raw.get("stream"):
-        async def events():
-            for e in rb.start():
-                yield e
-            evs = chat_events(req, c)
-            try:
-                async for ev in evs:
-                    for e in rb.feed(ev, P):
-                        yield e
-            finally:
-                await evs.aclose()
-        return StreamingResponse(events(), media_type="text/event-stream")
-    reasoning, content, calls, reason, n = await chat_answer(c)
-    return JSONResponse(rb.whole(reasoning, content, calls, reason, P, n))
+                         "usage": chat_usage(P, n)})
 
 
 @app.post("/v1/completions")
@@ -461,6 +535,7 @@ async def completions(req: Request):
     body = await req.json()
     prompt = body["prompt"] if isinstance(body["prompt"], str) else body["prompt"][0]
     ids = tok.encode(prompt, encode_special_tokens=True)
+    check_room(ids)
     sp, stops = openai_sp(body), stops_of(body)
     cid, created, P = "cmpl-" + uuid.uuid4().hex[:24], int(time.time()), ids.shape[-1]
     base = {"id": cid, "object": "text_completion", "created": created, "model": args.served_name}

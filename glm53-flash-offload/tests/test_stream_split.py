@@ -72,23 +72,32 @@ class Split(unittest.TestCase):
                 self.assertNotIn("<tool_call>", joined(out, "content"), pieces)
 
     def test_reasoning_then_content(self):
-        self.check("Let me think.\n</think>\n\nHello!", True, False, "Let me think.\n", "Hello!", "")
+        # the content as written: the blank lines the model puts after the think block stream too
+        self.check("Let me think.\n</think>\n\nHello!", True, False, "Let me think.\n", "\n\nHello!", "")
+        self.check("The user wants a forecast.</think>\n\nIt will rain.", True, True, "The user wants a forecast.",
+                   "\n\nIt will rain.", "")
 
     def test_reasoning_strips_open_tag(self):
         self.check("<think>abc</think>def", True, False, "abc", "def", "")
 
     def test_no_thinking(self):
-        self.check("\n\nPlain answer < with > signs", False, False, "", "Plain answer < with > signs", "")
+        self.check("\n\nPlain answer < with > signs", False, False, "", "\n\nPlain answer < with > signs", "")
+        self.check("\n\n", False, True, "", "\n\n", "")                   # blank to the end: sent at the end
 
     def test_answer_opens_its_own_think_block(self):
-        self.check("<think>hmm</think>\nOK", False, False, "hmm", "OK", "")
+        self.check("<think>hmm</think>\nOK", False, False, "hmm", "\nOK", "")
+        self.check("\n\n<think>hmm</think>OK", False, False, "hmm", "OK", "")   # blank lines before it go with it
+
+    def test_no_second_think_block(self):
+        self.check("r</think>\n<think>x</think>", True, False, "r", "\n<think>x</think>", "")
 
     def test_think_tag_later_in_content_is_text(self):
         self.check("Use <think> tags.", False, False, "", "Use <think> tags.", "")
 
     def test_tool_call_after_reasoning(self):
         ans = "I should call it.\n</think>\n\n" + CALL
-        self.check(ans, True, True, "I should call it.\n", "", CALL)
+        self.check(ans, True, True, "I should call it.\n", "\n\n", CALL)
+        self.check("<think>Need data.</think>\n" + CALL, True, True, "Need data.", "\n", CALL)
 
     def test_content_before_tool_call(self):
         ans = "Checking the weather.\n\n" + CALL + "\n" + CALL
@@ -98,6 +107,7 @@ class Split(unittest.TestCase):
         # "<tool" that never becomes a tool call is content, at the end at the latest
         self.check("a <tool b <tool_c", False, True, "", "a <tool b <tool_c", "")
         self.check("x <tool_call", False, True, "", "x <tool_call", "")
+        self.check("Use the <toolbox> command, x < 2.", False, True, "", "Use the <toolbox> command, x < 2.", "")
 
     def test_without_tools_tags_stream_as_content(self):
         self.check("Here: " + CALL, False, False, "", "Here: " + CALL, "")
@@ -116,6 +126,8 @@ class Split(unittest.TestCase):
         self.assertEqual(s.feed("_call>\n<function=f>"), [])              # a tool call: held from here on
         self.assertEqual(s.finish(), [])
         self.assertEqual(s.tool_text, "<tool_call>\n<function=f>")
+        s = S.StreamSplit(True, True)
+        self.assertEqual(s.feed("Sum.</think>\n\n"), [("reasoning", "Sum."), ("content", "\n\n")])   # nothing to hold
 
 
 class WholeAnswer(unittest.TestCase):

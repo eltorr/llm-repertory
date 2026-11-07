@@ -1,8 +1,9 @@
-"""OpenAI Responses API (/v1/responses) on top of the chat pipeline.
+"""OpenAI Responses API (/v1/responses) on serve.py's answer pipeline.
 
-responses_to_chat() turns a Responses request into a chat request: input items become messages, instructions
-the system message, function tools chat tools, max_output_tokens max_tokens, reasoning.effort reasoning_effort.
-ResponseBuilder turns the chat pipeline's deltas into Responses server-sent events, or builds a whole Response.
+responses_to_chat() turns a Responses request into the chat-shaped turn the pipeline runs: input items become
+messages, instructions the system message, function tools chat tools, max_output_tokens max_tokens, reasoning.effort
+reasoning_effort. ResponseBuilder turns the pipeline's events into Responses server-sent events, or builds a whole
+Response.
 
 - Text only. Function tools are passed to the model. tool_choice "none" leaves them out; a named function or
   "required" is passed on but not enforced, as in /v1/chat/completions (the chat pipeline has no constrained
@@ -13,7 +14,8 @@ ResponseBuilder turns the chat pipeline's deltas into Responses server-sent even
 - previous_response_id works for the last STORE_MAX responses while the server runs (in memory; store=false
   skips it). Clients that send the whole conversation each time (store=false) don't need it.
 - text.format (structured outputs) and include are accepted and ignored. usage doesn't count reasoning tokens
-  separately (reasoning_tokens is 0; they are in output_tokens).
+  separately (reasoning_tokens is 0; they are in output_tokens); input_tokens_details.cached_tokens is the prompt
+  tokens the prefix cache served.
 - The chat template takes one system message, first: instructions and every system or developer message, wherever
   it comes in the conversation, are joined into it in order.
 """
@@ -27,7 +29,7 @@ _STORE = OrderedDict()   # response id -> chat messages of that conversation, th
 
 
 class RequestError(ValueError):
-    """An invalid or unsupported Responses request (HTTP 400)."""
+    """An invalid or unsupported request (HTTP 400): a Responses request, or a body that isn't a request at all."""
 
 
 def _id(prefix):
@@ -145,7 +147,7 @@ def responses_to_chat(body):
 
 
 class ResponseBuilder:
-    """Responses output for one request: SSE events from the chat pipeline's deltas, or a whole Response."""
+    """Responses output for one request: SSE events from the pipeline's events, or a whole Response."""
 
     def __init__(self, body, model, convo):
         self.body, self.model, self.convo = body, model, convo
@@ -171,8 +173,9 @@ class ResponseBuilder:
             "usage": usage, "user": b.get("user"), "metadata": b.get("metadata") or {}}
 
     @staticmethod
-    def usage(prompt_tokens, completion_tokens):
-        return {"input_tokens": prompt_tokens, "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+    def usage(prompt_tokens, completion_tokens, cached_tokens=0):
+        return {"input_tokens": prompt_tokens,
+                "input_tokens_details": {"cached_tokens": cached_tokens, "cache_write_tokens": 0},
                 "output_tokens": completion_tokens, "output_tokens_details": {"reasoning_tokens": 0},
                 "total_tokens": prompt_tokens + completion_tokens}
 
@@ -207,7 +210,7 @@ class ResponseBuilder:
                 "name": call["function"]["name"], "arguments": call["function"]["arguments"]}
 
     # ---- whole response (stream=false)
-    def whole(self, reasoning, content, calls, reason, prompt_tokens, completion_tokens):
+    def whole(self, reasoning, content, calls, reason, prompt_tokens, completion_tokens, cached_tokens=0):
         if reasoning:
             self.output.append(self._reasoning_item(reasoning))
         if content:
@@ -215,7 +218,7 @@ class ResponseBuilder:
         for c in calls or []:
             self.output.append(self._call_item(c))
         self.content, self.calls = content or "", list(calls or [])
-        return self._finish(reason, self.usage(prompt_tokens, completion_tokens))
+        return self._finish(reason, self.usage(prompt_tokens, completion_tokens, cached_tokens))
 
     # ---- streaming
     def _ev(self, kind, **fields):
@@ -264,9 +267,9 @@ class ResponseBuilder:
         self.output.append(final)
         return done
 
-    def feed(self, ev, prompt_tokens):
-        """SSE events for one chat-pipeline delta: ("reasoning", text), ("content", text), ("tool_calls", calls),
-        or ("end", finish_reason, completion_tokens)."""
+    def feed(self, ev, prompt_tokens, cached_tokens=0):
+        """SSE events for one pipeline event: ("reasoning", text), ("content", text), ("tool_calls", calls), or
+        ("end", finish_reason, completion_tokens); cached_tokens: the prompt tokens the prefix cache served."""
         kind, out = ev[0], []
         if kind in ("reasoning", "content"):
             if not ev[1]:
@@ -296,7 +299,7 @@ class ResponseBuilder:
                 self.calls.append(c)
         elif kind == "end":
             out += self._close()
-            r = self._finish(ev[1], self.usage(prompt_tokens, ev[2]))
+            r = self._finish(ev[1], self.usage(prompt_tokens, ev[2], cached_tokens))
             out.append(self._ev("response.incomplete" if r["status"] == "incomplete" else "response.completed",
                                 response=r))
         return out

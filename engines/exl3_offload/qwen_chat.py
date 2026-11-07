@@ -1,13 +1,11 @@
-"""Qwen3.8's chat format, for the server's chat endpoints: the prompt, the answer's parts and its tool calls.
+"""Qwen3.8's chat format, for the engine's hooks (server.py sets them): the prompt, its tool calls and its sampling.
 
   ChatTemplate      renders the model folder's chat template in Jinja's sandbox, as Hugging Face's tokenizers
                     do, so no Python from the model folder ever runs
-  AnswerStream      splits an answer arriving piece by piece into reasoning and content deltas, holding back only
-                    what may still turn out to be markup, so prose streams even when tools are offered
-  whole_answer      the same for a finished answer
   parse_tool_calls  the model's tool calls as OpenAI tool_calls
   with_sampling     the sampling values the model is meant to run with, where a request leaves them out
 
+The engine splits the answer into reasoning, content and tool calls (glm53/stream_split.py); its tags are Qwen3.8's.
 The format, as the model writes it (the prompt has already opened the think block when thinking is on):
   ...reasoning...</think>
 
@@ -26,7 +24,6 @@ import secrets
 import time
 from pathlib import Path
 
-THINK_OPEN, THINK_CLOSE = "<think>", "</think>"
 CALL_OPEN, CALL_CLOSE = "<tool_call>", "</tool_call>"
 
 # The values the Qwen team recommends: one set with thinking on, one with it off
@@ -154,79 +151,3 @@ def parse_tool_calls(text, tools):
     if not calls:
         return text, []
     return "".join(prose).strip(), calls
-
-
-# ----------------------------------------------------------------------------------------------------------- answers
-def _cut_tag(text, tag):
-    """How many characters at the end of `text` could be the start of `tag` (it may arrive in the next piece)."""
-    for n in range(min(len(tag) - 1, len(text)), 0, -1):
-        if tag.startswith(text[-n:]):
-            return n
-    return 0
-
-
-class AnswerStream:
-    """An answer as it arrives, split into what a client may see now.
-
-    feed(piece) and finish() return events: ("reasoning", text), ("content", text) and, from finish() only,
-    ("tool_calls", calls). With thinking on, the text up to </think> is reasoning. With tools offered, everything
-    from <tool_call> on is kept and parsed whole at the end. A tag cut in two by a piece boundary is held until the
-    next piece shows what it is, so no markup reaches the client."""
-
-    def __init__(self, thinking=True, tools=None):
-        self.part = "reasoning" if thinking else "content"
-        self.tools = tools
-        self.held = ""           # arrived, not sent yet: a possible partial tag
-        self.calls = ""          # from <tool_call> on
-
-    def feed(self, piece):
-        return self._split(piece, final=False)
-
-    def finish(self):
-        events = self._split("", final=True)
-        if self.calls:
-            rest, calls = parse_tool_calls(self.calls, self.tools)
-            if rest:
-                events.append(("content", rest))
-            if calls:
-                events.append(("tool_calls", calls))
-        return events
-
-    def _split(self, piece, final):
-        text, self.held, events = self.held + piece, "", []
-        while text:
-            if self.part == "calls":
-                self.calls += text
-                break
-            if self.part == "reasoning":
-                before, found, after = text.partition(THINK_CLOSE)
-                if found:
-                    events.append(("reasoning", before.replace(THINK_OPEN, "")))
-                    self.part, text = "content", after
-                    continue
-                tag = THINK_CLOSE
-            else:
-                start = text.find(CALL_OPEN) if self.tools else -1
-                if start >= 0:
-                    events.append(("content", text[:start]))
-                    self.part, text = "calls", text[start:]
-                    continue
-                tag = CALL_OPEN if self.tools else None
-            keep = 0 if final or tag is None else _cut_tag(text, tag)
-            events.append((self.part, text[:len(text) - keep].replace(THINK_OPEN, "") if self.part == "reasoning"
-                           else text[:len(text) - keep]))
-            self.held = text[len(text) - keep:]
-            break
-        return [(kind, value) for kind, value in events if value]
-
-
-def whole_answer(text, thinking=True, tools=None):
-    """A finished answer: (reasoning or None, content, tool calls). A think block never closed (the answer ran out
-    of tokens) is all reasoning."""
-    reasoning = None
-    if thinking:
-        before, found, after = text.partition(THINK_CLOSE)
-        reasoning, text = (before, after) if found else (text, "")
-        reasoning = reasoning.replace(THINK_OPEN, "").strip()
-    content, calls = parse_tool_calls(text.strip(), tools)
-    return reasoning, content, calls

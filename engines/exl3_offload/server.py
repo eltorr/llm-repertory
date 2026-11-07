@@ -5,13 +5,11 @@
 
 engines/exl3_offload/run.sh starts it sized for the card; the manager starts it through bin/repertory-backend.
 
-The model is loaded by loader.py and served by the engine's own app (glm53-flash-offload/glm53/serve.py: generation,
-streaming, /v1/completions, /v1/models, /generate, /tokenize, /stats, /nv_verify). This file adds:
-  - the chat endpoints in the model's own format (qwen_chat.py), in place of the engine's: /v1/chat/completions,
-    and /v1/responses on top of it, with the engine's openai_responses.py and openai_compat.py (OpenAI's reasoning
-    levels mapped onto the model's);
-  - the model's sampling values where a request leaves them out, and a clear error for a prompt that leaves no
-    room in the context;
+The model is loaded by loader.py and served by the engine's own app (glm53-flash-offload/glm53/serve.py): its routes
+answer every request, /v1/responses and /v1/chat/completions included, with the context check, the prefix-cache
+figures and OpenAI's 400s. This file adds what is Repertory's or the model's:
+  - the model's format in the engine's hooks (qwen_chat.py): its chat template, its tool calls, its sampling values
+    where a request leaves them out, and its end-of-turn token among the stop tokens;
   - /memory: the RAM and VRAM watchdogs (memory_guard.py);
   - the manager's switches without a restart: POST /expert_cache/resize, GET /expert_cache/ram and
     POST /expert_cache/ram/stop;
@@ -19,7 +17,6 @@ streaming, /v1/completions, /v1/models, /generate, /tokenize, /stats, /nv_verify
 """
 import argparse
 import asyncio
-import contextvars
 import hmac
 import json
 import os
@@ -31,15 +28,12 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 ENGINE = ROOT / "glm53-flash-offload" / "glm53"
-CHAT_PATHS = ("/v1/chat/completions", "/v1/responses")
 LOCAL_NAMES = ("127.0.0.1", "localhost", "::1")
 KEY_HEADER = b"x-repertory-key"
 
 sys.path.insert(0, str(HERE))
-sys.path.append(str(ENGINE))            # the engine's modules: openai_*, serve, nv2, expert_cache...
+sys.path.append(str(ENGINE))            # the engine's modules: serve, nv2, expert_cache...
 import memory_guard  # noqa: E402
-import openai_compat  # noqa: E402
-import openai_responses  # noqa: E402
 import qwen_chat  # noqa: E402
 
 
@@ -229,25 +223,7 @@ class RamWorker:
             if freed and done and os.environ.get('QWEN_RAM_COMPACT','1' if in_wsl() else '0')=='1':compact_memory()
 
 
-# ------------------------------------------------------------------------------------------------------- the context
-class ContextFull(ValueError):
-    """The prompt fills the context: no room is left for an answer."""
-
-    def __init__(self, prompt_tokens, context):
-        super().__init__(f"the prompt has {prompt_tokens:,} tokens and this server's context holds {context:,}, which "
-                         f"leaves no room for an answer: shorten the conversation")
-
-
-def answer_room(prompt_tokens, context, draft_tokens=0):
-    """Tokens an answer may still take: what the engine's run_job leaves after the prompt (the drafts' share, 8 when
-    there are none, and 2 spare)."""
-    return context - prompt_tokens - (draft_tokens or 8) - 2
-
-
-def openai_error(message, kind="invalid_request_error", code=None):
-    return {"error": {"message": message, "type": kind, "param": None, "code": code}}
-
-
+# ---------------------------------------------------------------------------------------------------------- the model
 def stop_tokens(config, tok, model_dir):
     """Token ids that end an answer: the model config's, the tokenizer's, generation_config.json's and the chat
     format's end of turn."""
@@ -266,17 +242,6 @@ def stop_tokens(config, tok, model_dir):
     return sorted(int(i) for i in ids)
 
 
-def cached_tokens(job, page_size=None):
-    """How much of a job's prompt came from the prefix cache: whole pages of the KV cache, then the rest of a partly
-    matched page (exllamav3's Job counts both)."""
-    inner = getattr(job, "job", None)
-    if inner is None:
-        return 0
-    if page_size is None:
-        from exllamav3.constants import PAGE_SIZE as page_size
-    return int(getattr(inner, "cached_pages", 0)) * page_size + int(getattr(inner, "cached_tokens", 0))
-
-
 # ------------------------------------------------------------------------------------------------------------ server
 class Server:
     """The engine's app with Repertory's additions, around a loaded model."""
@@ -284,7 +249,6 @@ class Server:
     def __init__(self, cli, engine, loaded, template, ram, vram):
         model, config, cache, tok, self.pools, self.tables, draft_model, draft_cache = loaded
         self.cli, self.engine, self.template, self.ram, self.vram = cli, engine, template, ram, vram
-        self.job = contextvars.ContextVar("job", default=None)    # the request's engine job, for its usage figures
         self.resizing, self.worker = asyncio.Lock(), None
         # what the engine's routes read from the command line serve.load would have parsed
         settings = {"cache_size": cli.cache, "chunk_size": cli.chunk, "cache_quant": "4",
@@ -301,45 +265,21 @@ class Server:
 
     # -------------------------------------------------------------------------------------- engine hooks
     def wire(self):
+        """The model's format in the engine's hooks, wherever it builds a prompt or reads an answer: the chat template
+        (its refusals are TemplateError, a ValueError: the engine answers 400), the tool calls and the sampling
+        values. Qwen3.8 writes the engine's own think and tool-call tags, so those stay. Then Repertory's routes."""
         e, server = self.engine, self
-        plain_sampling, run_job = e.openai_sp, e.run_job
+        plain_sampling = e.openai_sp
         e.openai_sp = lambda body: plain_sampling(qwen_chat.with_sampling(body))
-        # the model's format wherever the engine itself builds a prompt or reads tool calls
         e.chat_prompt = lambda messages, enable_thinking=True, tools=None, template_kwargs=None: self.template.render(
             e.normalize_messages(messages), tools, enable_thinking, template_kwargs)
         e.parse_tool_calls = qwen_chat.parse_tool_calls
-
-        class Job(e.AsyncJob):
-            def __init__(self, generator, *a, **kw):
-                super().__init__(generator, *a, **kw)
-                server.job.set(self)
-
-        e.AsyncJob = Job
-
-        async def checked_run_job(ids, sp, stop_strings=None):
-            # the chat endpoints check before they answer; this covers the engine's own (/v1/completions, ...)
-            if answer_room(ids.shape[-1], e.CTX, e.args.num_draft_tokens) < 1:
-                from fastapi import HTTPException
-                raise HTTPException(400, str(ContextFull(ids.shape[-1], e.CTX)))
-            async for step in run_job(ids, sp, stop_strings):
-                yield step
-
-        e.run_job = checked_run_job
         from fastapi import Request
-
-        async def chat(req: Request):
-            return await server.chat(req)
-
-        async def responses(req: Request):
-            return await server.responses(req)
 
         async def resize(req: Request):
             return await server.resize(req)
 
         app = e.app
-        app.router.routes[:] = [r for r in app.router.routes if getattr(r, "path", None) not in CHAT_PATHS]
-        app.add_api_route("/v1/chat/completions", chat, methods=["POST"])
-        app.add_api_route("/v1/responses", responses, methods=["POST"])
         app.add_api_route("/memory", self.memory, methods=["GET"])
         app.add_api_route("/expert_cache/ram", self.ram_state, methods=["GET"])
         app.add_api_route("/expert_cache/ram/stop", self.ram_stop, methods=["POST"])
@@ -353,141 +293,6 @@ class Server:
         for guard in (self.vram, self.ram):
             if guard is not None:
                 guard.close()
-
-    # -------------------------------------------------------------------------------------- chat
-    def turn(self, body):
-        """A chat request as the engine runs it: the prompt's token ids and the generation settings."""
-        e = self.engine
-        body = openai_compat.normalize_chat_request(body)
-        options = dict(body.get("chat_template_kwargs") or {})
-        if body.get("reasoning_effort") is not None:
-            options.setdefault("reasoning_effort", body["reasoning_effort"])
-        thinking = bool(options.get("enable_thinking", True))
-        tools = body.get("tools") if body.get("tool_choice") != "none" else None
-        prompt = self.template.render(e.normalize_messages(body["messages"]), tools, thinking, options)
-        ids = e.tok.encode(prompt, encode_special_tokens=True)
-        if answer_room(ids.shape[-1], e.CTX, e.args.num_draft_tokens) < 1:
-            raise ContextFull(ids.shape[-1], e.CTX)
-        return {"body": body, "ids": ids, "thinking": thinking, "tools": tools, "sampling": e.openai_sp(body),
-                "stops": e.stops_of(body)}
-
-    async def deltas(self, req, turn):
-        """The answer as it streams: ("reasoning", text), ("content", text), ("tool_calls", calls), and last
-        ("end", finish_reason, completion_tokens)."""
-        e = self.engine
-        steps = e.run_job(turn["ids"], turn["sampling"], turn["stops"])
-        gone, watcher = e.watch_disconnect(req)
-        split, sent, n, fin = qwen_chat.AnswerStream(turn["thinking"], turn["tools"]), 0, 0, None
-        try:
-            async for step in steps:
-                text, n, fin = step
-                for event in split.feed(text[sent:]):
-                    yield event
-                sent = len(text)
-                if fin is None and gone.is_set():
-                    break
-            reason = (fin or {}).get("type", "stop")
-            for event in split.finish():
-                if event[0] == "tool_calls":
-                    reason = "tool_calls"
-                yield event
-            yield ("end", reason, n)
-        finally:
-            gone.set()
-            watcher.cancel()
-            await steps.aclose()
-
-    async def whole(self, turn):
-        """The whole answer: (reasoning, content, tool calls, finish_reason, completion_tokens)."""
-        text, n, fin = "", 0, None
-        async for step in self.engine.run_job(turn["ids"], turn["sampling"], turn["stops"]):
-            text, n, fin = step
-        reasoning, content, calls = qwen_chat.whole_answer(text, turn["thinking"], turn["tools"])
-        return reasoning, content, calls, "tool_calls" if calls else (fin or {}).get("type"), n
-
-    def usage(self, prompt_tokens, completion_tokens):
-        out = {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
-               "total_tokens": prompt_tokens + completion_tokens}
-        job = self.job.get()
-        if job is not None:
-            out["prompt_tokens_details"] = {"cached_tokens": cached_tokens(job)}
-        return out
-
-    @staticmethod
-    async def request_body(req, needs="messages"):
-        """The request's JSON object; TemplateError (HTTP 400) for anything else, or without `needs`."""
-        try:
-            body = await req.json()
-        except ValueError:
-            body = None
-        if not isinstance(body, dict) or needs not in body:
-            raise qwen_chat.TemplateError(f"expected a JSON object with {needs}")
-        return body
-
-    async def chat(self, req):
-        from fastapi.responses import JSONResponse, StreamingResponse
-        e = self.engine
-        try:
-            turn = self.turn(await self.request_body(req))
-        except (ContextFull, qwen_chat.TemplateError) as err:
-            code = "context_length_exceeded" if isinstance(err, ContextFull) else None
-            return JSONResponse(openai_error(str(err), code=code), 400)
-        cid, created, prompt = f"chatcmpl-{os.urandom(12).hex()}", int(time.time()), turn["ids"].shape[-1]
-        head = {"id": cid, "object": "chat.completion.chunk", "created": created, "model": e.args.served_name}
-
-        def chunk(delta, finish=None, **extra):
-            return e.sse(dict(head, choices=[{"index": 0, "delta": delta, "finish_reason": finish}], **extra))
-
-        if turn["body"].get("stream"):
-            async def events():
-                yield chunk({"role": "assistant", "content": ""})
-                stream = self.deltas(req, turn)
-                try:
-                    async for event in stream:
-                        if event[0] == "end":
-                            yield chunk({}, event[1], usage=self.usage(prompt, event[2]))
-                            yield "data: [DONE]\n\n"
-                        elif event[0] == "tool_calls":
-                            yield chunk({"tool_calls": [dict(c, index=i) for i, c in enumerate(event[1])]})
-                        else:
-                            yield chunk({"reasoning_content" if event[0] == "reasoning" else "content": event[1]})
-                finally:
-                    await stream.aclose()
-            return StreamingResponse(events(), media_type="text/event-stream")
-        reasoning, content, calls, reason, n = await self.whole(turn)
-        message = {"role": "assistant", "content": content, "reasoning_content": reasoning}
-        if calls:
-            message["tool_calls"] = calls
-        return JSONResponse({"id": cid, "object": "chat.completion", "created": created, "model": e.args.served_name,
-                             "choices": [{"index": 0, "message": message, "finish_reason": reason}],
-                             "usage": self.usage(prompt, n)})
-
-    async def responses(self, req):
-        """The OpenAI Responses API, translated onto the chat pipeline (openai_responses.py)."""
-        from fastapi.responses import JSONResponse, StreamingResponse
-        try:
-            raw = await self.request_body(req, "input")
-            body, convo = openai_responses.responses_to_chat(raw)
-            turn = self.turn(body)
-        except (openai_responses.RequestError, ContextFull, qwen_chat.TemplateError) as err:
-            code = "context_length_exceeded" if isinstance(err, ContextFull) else None
-            return JSONResponse(openai_error(str(err), code=code), 400)
-        prompt = turn["ids"].shape[-1]
-        builder = openai_responses.ResponseBuilder(raw, self.engine.args.served_name, convo)
-        if raw.get("stream"):
-            async def events():
-                for event in builder.start():
-                    yield event
-                stream = self.deltas(req, turn)
-                try:
-                    async for delta in stream:
-                        for event in builder.feed(delta, prompt):
-                            yield event
-                finally:
-                    await stream.aclose()
-            return StreamingResponse(events(), media_type="text/event-stream")
-        reasoning, content, calls, reason, n = await self.whole(turn)
-        return JSONResponse(builder.whole(reasoning, content, calls, reason, prompt, n))
 
     # -------------------------------------------------------------------------------------- memory
     async def memory(self):

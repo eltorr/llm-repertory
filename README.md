@@ -13,7 +13,7 @@ experts spread over VRAM, RAM and NVMe. Clients reach it through an OpenAI-compa
 - **Setup** on Windows (with the engine in WSL2) and Linux, from the dashboard's Setup tab or a terminal.
 - **Presets** that size the model to the card and the RAM.
 - **Benchmarks** of any configuration on this machine, from the dashboard or `repertory bench`.
-- **The API:** OpenAI Chat Completions and Responses, with streaming, tools and reasoning levels ([api.md](docs/api.md)).
+- **The API:** OpenAI Responses and Chat Completions, with streaming, tools and reasoning levels ([api.md](docs/api.md)).
 
 ## Quick start
 

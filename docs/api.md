@@ -1,6 +1,7 @@
 # Repertory API
 
-OpenAI-compatible: **Chat Completions** and **Responses**, tested with the official `openai` Python SDK.
+OpenAI-compatible: the **Responses** API, and **Chat Completions** for compatibility. Both run on one pipeline, so the
+model, sampling, tools and reasoning behave the same. Tested with the official `openai` Python SDK.
 
 ```
 Base URL:  http://127.0.0.1:30000/v1
@@ -10,39 +11,15 @@ Model:     qwen3.8-flash-next   (any name works)
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/v1/chat/completions` | The main endpoint: streaming, tools, reasoning control |
-| POST | `/v1/responses` | OpenAI's newer API, on the same model. See [Responses API](#responses-api) |
+| POST | `/v1/responses` | The main API: streaming, function tools, reasoning control. See [Responses API](#responses-api) |
+| POST | `/v1/chat/completions` | Supported for compatibility, with the same features. See [Chat Completions](#chat-completions) |
 | POST | `/v1/completions` | Legacy raw-prompt completion |
 | GET | `/v1/models` | Answered without loading the model |
 
 Not available: embeddings, images, audio, files, batches, assistants and Anthropic's `/v1/messages`. These return
 404.
 
-## Chat Completions
-
-| Field | Notes |
-|---|---|
-| `messages` | `system`, `user`, `assistant` (with `tool_calls`) and `tool`. Text only |
-| `stream` | Server-sent events |
-| `max_tokens` | Default: the rest of the context window |
-| `temperature`, `top_p`, `top_k`, `min_p`, `stop` | `top_k` and `min_p` go in `extra_body` with the SDK |
-| `tools` | OpenAI function schema. Calls come back as standard `tool_calls` |
-| `tool_choice` | `"none"` disables tools; anything else acts as `"auto"` |
-| `reasoning_effort` | The model has `low`, `medium` and `xhigh` (the default). OpenAI's values are mapped: `minimal`→`low`, `high` and `max`→`xhigh`, `none`→thinking off |
-| `chat_template_kwargs.enable_thinking` | `false` turns thinking off. Put it in `extra_body` |
-| `n`, `response_format`, penalties, `logprobs`, `seed` | Ignored |
-
-- **Sampling defaults:**
-  - with thinking: `temperature` 1.0, `top_p` 0.95, `top_k` 20;
-  - without thinking: `temperature` 0.7, `top_p` 0.8, `top_k` 20.
-- **Thinking:** returned in `message.reasoning_content`, and streamed before the answer. If the output is cut off
-  while the model is thinking, `content` is empty.
-- **Tool calls:** in a stream, prose before a call streams as it comes, and the calls arrive whole in the last
-  delta. No tool-call markup reaches `content`.
-
 ## Responses API
-
-`POST /v1/responses` runs on the same pipeline as chat, so the model, sampling, tools and reasoning behave the same.
 
 | Field | Notes |
 |---|---|
@@ -50,9 +27,11 @@ Not available: embeddings, images, audio, files, batches, assistants and Anthrop
 | `instructions` | Becomes the system message |
 | `stream` | The standard Responses events, ending with `response.completed`, or `response.incomplete` if cut off |
 | `tools` | `function` tools only. Built-in tools (web search, file search and so on) are left out |
+| `tool_choice` | `"none"` disables tools; anything else acts as `"auto"` |
 | `previous_response_id` | The last 64 responses are kept in memory. After a restart, send the whole conversation instead. `store: false` skips saving |
-| `reasoning.effort` | Mapped like `reasoning_effort` |
-| `max_output_tokens`, `temperature`, `top_p` | As in chat |
+| `reasoning.effort` | The model has `low`, `medium` and `xhigh` (the default). OpenAI's values are mapped: `minimal`→`low`, `high` and `max`→`xhigh`, `none`→thinking off |
+| `max_output_tokens` | Default: the rest of the context window |
+| `temperature`, `top_p` | `top_k`, `min_p` and `stop` work too |
 
 The output has three kinds of item:
 - a `reasoning` item, with the model's thinking;
@@ -60,42 +39,66 @@ The output has three kinds of item:
 - one `function_call` item per tool call.
 
 ```python
+from openai import OpenAI
+client = OpenAI(base_url="http://127.0.0.1:30000/v1", api_key="local")
+
 r = client.responses.create(model="qwen3.8-flash-next", input="Explain B-trees in two sentences.",
                             reasoning={"effort": "medium"})
 print(r.output_text)
 follow_up = client.responses.create(model="qwen3.8-flash-next", input="Now in one.", previous_response_id=r.id)
 ```
 
-## Good to know
+## Chat Completions
 
-- **One request runs at a time.** Up to 8 more wait in a queue, so run agents with one request at a time.
-- **Cold start:** if the model is paused, the first request waits about 40 s while it loads, so set client
-  timeouts to at least 120 s.
-- **Prefix cache:** a repeated 94K-token prompt took 0.14 s instead of 15 s. Chat answers report the reused part in
-  `usage.prompt_tokens_details.cached_tokens`.
-- **Errors:** in OpenAI's shape.
-  - `503`: the model couldn't start; for example, other apps hold the GPU.
-  - `502`: the model server is unreachable.
-  - `400`: the prompt fills the context window (`context_length_exceeded`), or the request isn't a chat request.
+Supported for compatibility: OpenAI still supports Chat Completions and has announced no end to it (unlike the
+Assistants API, which it shut down on 2026-08-26), and many clients and agents use it.
 
-**Client settings:**
-- **Context window:** 262144.
-- **Max output tokens:** none, or 32K or more, since thinking can be long.
-- **Temperature:** leave it unset.
-- **`reasoning_effort`:** `medium` for agent loops.
+| Field | Notes |
+|---|---|
+| `messages` | `system`, `user`, `assistant` (with `tool_calls`) and `tool`. Text only |
+| `stream` | Server-sent events |
+| `max_tokens` | Default: the rest of the context window |
+| `temperature`, `top_p`, `top_k`, `min_p`, `stop` | `top_k` and `min_p` go in `extra_body` with the SDK |
+| `tools`, `tool_choice` | OpenAI function schema; calls come back as standard `tool_calls`. `tool_choice: "none"` disables tools; anything else acts as `"auto"` |
+| `reasoning_effort` | Mapped as in Responses |
+| `chat_template_kwargs.enable_thinking` | `false` turns thinking off. Put it in `extra_body` |
+| `n`, `response_format`, penalties, `logprobs`, `seed` | Ignored |
 
-## Example
+- **Thinking:** returned in `message.reasoning_content`, and streamed before the answer. If the output is cut off
+  while the model is thinking, `content` is empty.
+- **Tool calls:** in a stream, prose before a call streams as it comes, and the calls arrive whole in the last
+  delta. No tool-call markup reaches `content`.
 
 ```python
-from openai import OpenAI
-client = OpenAI(base_url="http://127.0.0.1:30000/v1", api_key="local")
-
 for chunk in client.chat.completions.create(
         model="qwen3.8-flash-next", stream=True, reasoning_effort="medium",
         messages=[{"role": "user", "content": "Write a Python LRU cache."}]):
     if chunk.choices and chunk.choices[0].delta.content:
         print(chunk.choices[0].delta.content, end="")
 ```
+
+## Good to know
+
+- **Sampling defaults** where a request leaves them out:
+  - with thinking: `temperature` 1.0, `top_p` 0.95, `top_k` 20;
+  - without thinking: `temperature` 0.7, `top_p` 0.8, `top_k` 20.
+- **One request runs at a time.** Up to 8 more wait in a queue, so run agents with one request at a time.
+- **Cold start:** if the model is paused, the first request waits about 40 s while it loads, so set client
+  timeouts to at least 120 s.
+- **Prefix cache:** a repeated 94K-token prompt took 0.14 s instead of 15 s. Usage reports the reused part:
+  `usage.input_tokens_details.cached_tokens` (Responses), `usage.prompt_tokens_details.cached_tokens` (Chat
+  Completions).
+- **Errors:** in OpenAI's shape.
+  - `503`: the model couldn't start; for example, other apps hold the GPU.
+  - `502`: the model server is unreachable.
+  - `400`: the prompt fills the context window (`context_length_exceeded`), the body isn't a request (a JSON object
+    with `input`, or with `messages`), or the model's chat template refuses the conversation.
+
+**Client settings:**
+- **Context window:** 262144.
+- **Max output tokens:** none, or 32K or more, since thinking can be long.
+- **Temperature:** leave it unset.
+- **Reasoning effort:** `medium` for agent loops.
 
 ## Control API (the dashboard's, not OpenAI)
 
