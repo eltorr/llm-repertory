@@ -33,4 +33,15 @@ Found on the first start: the nv2 control region tripped a page-alignment check,
 handed back an unaligned address for a small request. Fixed in `glm53/wsl_pinned.py` (over-allocate by a page and
 align); the run above is with the fix.
 
-Raw results: [results/](results/).
+**After the switch to Repertory's manager** (same requests through its front door on port 30000, the model started
+by the manager with its usual plan: 28.7 GB VRAM budget, 35 GiB RAM cache): all five answers identical again, and
+with a VRAM cache the same size as the earlier engine's (7,008 experts against about 7,200) the speeds are close to
+it: decode 41.1 / 38.4 / 28.0 / 34.6 tok/s for short, code, document and thinking (earlier 30.5 / 32.6 / 28.4 /
+37.0), first token on the document 12.7 s (earlier 12.4 s).
+
+That first manager start found a second problem, now fixed: the expert cache sized itself only inside torch's memory
+cap, which leaves out the CUDA context and other allocators, and ended 2.5 GB past the manager's device-wide VRAM
+limit (0.6 GB free on the card instead of the 3.2 GB the manager keeps for the desktop and games). It sizes to that
+limit again (`GLM53_VRAM_LIMIT_BYTES`), and uses 27.0 GB, as the earlier engine did.
+
+Raw results: [results/](results/) (`repertory-manager.json` is the run through the manager).

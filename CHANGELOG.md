@@ -38,7 +38,11 @@ models on a PC that is also used for other things, with one adapter per engine.
 - **Same answers as before:** on the same model files, Repertory's engine gives identical answers to the engine
   the earlier fork served, for five greedy requests from a short answer to a 30K-token document
   ([report](research/engine-parity/REPORT.md)). Found on its first start: under WSL2, `cudaHostAlloc` can hand back
-  an unaligned address for a small request; the engine now aligns it.
+  an unaligned address for a small request; the engine now aligns it. Through the manager, the answers are
+  identical again and the speeds close to the earlier engine's.
+- **The VRAM expert cache sizes itself to the manager's device-wide VRAM limit** (`GLM53_VRAM_LIMIT_BYTES`, set from
+  `QWEN_VRAM_LIMIT_BYTES`), as the earlier engine did: sized only inside torch's memory cap, it left out the CUDA
+  context and ended 2.5 GB past the limit.
 - **Engines and models** ([docs](docs/engines.md)): the engine runs Qwen3.8-Flash-Next and GLM-5.3-Flash; Repertory
   offers Qwen so far. What runs compiled and what in Python, and what is still open.
 - **The model server uses this checkout's ExLlamaV3** (`run.sh` puts it first on `PYTHONPATH`), even with a
