@@ -32,6 +32,11 @@ models on a PC that is also used for other things, with one adapter per engine.
   `%LOCALAPPDATA%\Repertory` or `~/.local/state/repertory`, and the engine's state in `.repertory/`. The engine's
   settings are its upstream `GLM53_*` flags.
 - **Moving from QwenFlash:** on its first start, Repertory takes over QwenFlash's settings and learned limits, so the
-  dashboard's private link and signed-in devices keep working. On Windows, the engine checkout inside WSL stays
-  where it was, with its models. The ports and the API are unchanged.
+  dashboard's private link and signed-in devices keep working. On Windows, Repertory keeps an engine checkout of its
+  own inside WSL (`/root/repertory`) and links the models and expert stores QwenFlash downloaded instead of
+  fetching them again. The ports and the API are unchanged.
+- **Same answers as before:** on the same model files, Repertory's engine gives identical answers to the engine
+  the earlier fork served, for five greedy requests from a short answer to a 30K-token document
+  ([report](research/engine-parity/REPORT.md)). Found on its first start: under WSL2, `cudaHostAlloc` can hand back
+  an unaligned address for a small request; the engine now aligns it.
 - **License:** MIT for Repertory's own code.

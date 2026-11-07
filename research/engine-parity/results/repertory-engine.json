@@ -1,0 +1,106 @@
+{
+ "base": "http://127.0.0.1:PORT",
+ "when": "2026-11-07 14:30:00",
+ "results": [
+  {
+   "name": "short",
+   "content": "A heat pump operates by circulating a refrigerant through a closed loop, where it absorbs thermal energy from a cooler source and evaporates into a gas. This gas is then compressed, which significantly raises its temperature and pressure, allowing it to release that heat into a warmer destination as it condenses back into a liquid. Finally, the refrigerant passes through an expansion valve to drop its pressure and temperature, resetting the cycle to absorb more heat from the source.",
+   "reasoning": "",
+   "tool_calls": [],
+   "finish": "stop",
+   "usage": {
+    "prompt_tokens": 24,
+    "completion_tokens": 92,
+    "total_tokens": 116,
+    "prompt_tokens_details": {
+     "cached_tokens": 0
+    }
+   },
+   "ttft_s": 0.809,
+   "total_s": 2.713,
+   "decode_tps": 48.3
+  },
+  {
+   "name": "code",
+   "content": "```python\ndef fibonacci(n: int) -> int:\n    \"\"\"\n    Return the n-th Fibonacci number using an iterative approach.\n    \n    The Fibonacci sequence is defined as:\n        F(0) = 0\n        F(1) = 1\n        F(n) = F(n-1) + F(n-2) for n > 1\n    \n    Parameters:\n        n (int): The index in the Fibonacci sequence (must be non-negative).\n    \n    Returns:\n        int: The n-th Fibonacci number.\n    \n    Raises:\n        ValueError: If n is negative.\n    \n    Examples:\n        >>> fibonacci(0)\n        0\n        >>> fibonacci(1)\n        1\n        >>> fibonacci(10)\n        55\n    \"\"\"\n    if n < 0:\n        raise ValueError(\"n must be a non-negative integer\")\n    if n == 0:\n        return 0\n    if n == 1:\n        return 1\n    \n    prev, curr = 0, 1\n    for _ in range(2, n + 1):\n        prev, curr = curr, prev + curr\n    return curr\n```",
+   "reasoning": "",
+   "tool_calls": [],
+   "finish": "stop",
+   "usage": {
+    "prompt_tokens": 31,
+    "completion_tokens": 262,
+    "total_tokens": 293,
+    "prompt_tokens_details": {
+     "cached_tokens": 0
+    }
+   },
+   "ttft_s": 0.297,
+   "total_s": 5.928,
+   "decode_tps": 46.5
+  },
+  {
+   "name": "tool",
+   "content": "",
+   "reasoning": "",
+   "tool_calls": [
+    {
+     "id": "call_ad0a8d4b0bcc654f06932852",
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "arguments": "{\"city\": \"Lisbon\"}"
+     },
+     "index": 0
+    }
+   ],
+   "finish": "tool_calls",
+   "usage": {
+    "prompt_tokens": 278,
+    "completion_tokens": 28,
+    "total_tokens": 306,
+    "prompt_tokens_details": {
+     "cached_tokens": 0
+    }
+   },
+   "ttft_s": 2.206,
+   "total_s": 2.206,
+   "decode_tps": null
+  },
+  {
+   "name": "document",
+   "content": "The backup generator was serviced by technician Ilsa Varga, and the code word is PERIWINKLE.",
+   "reasoning": "",
+   "tool_calls": [],
+   "finish": "stop",
+   "usage": {
+    "prompt_tokens": 73241,
+    "completion_tokens": 23,
+    "total_tokens": 73264,
+    "prompt_tokens_details": {
+     "cached_tokens": 0
+    }
+   },
+   "ttft_s": 12.581,
+   "total_s": 13.215,
+   "decode_tps": 36.3
+  },
+  {
+   "name": "reasoning",
+   "content": "\n\nNo; 221 = 13 \u00d7 17.",
+   "reasoning": "We need answer user: \"Is 221 a prime number? Answer briefly.\" Need final brief. 221 = 13*17, not prime. Brief.\n",
+   "tool_calls": [],
+   "finish": "stop",
+   "usage": {
+    "prompt_tokens": 64,
+    "completion_tokens": 58,
+    "total_tokens": 122,
+    "prompt_tokens_details": {
+     "cached_tokens": 0
+    }
+   },
+   "ttft_s": 0.457,
+   "total_s": 1.929,
+   "decode_tps": 39.4
+  }
+ ]
+}
