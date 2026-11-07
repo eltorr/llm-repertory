@@ -6,6 +6,10 @@ What changed in Repertory, newest first.
 
 - The repository is now `eltorr/llm-repertory` (the old address redirects); the product, the package and the
   command stay `repertory`. A fresh clone lands in `llm-repertory/`.
+- The CodeQL scan works in a private repository: it failed every run there, since code scanning (the upload) isn't
+  available to private repositories without Advanced Security, and the action lacked permission to read its own
+  run. While private, the findings go to the run's summary page and a SARIF artifact, and high-severity ones fail
+  the job; once public, they upload to Security > Code scanning as before.
 - The README is reorganized: quick start, how to use it (clients, games, other devices, benchmarks, updating), the
   parts it's built from, dashboard screenshots, presets and a short table of measured speeds. Every measured
   configuration moved to [docs/measured.md](docs/measured.md). The preset table says "measured" or "not tested yet"
