@@ -1,5 +1,7 @@
 # Repertory
 
+Local AI that shares your GPU. Run big models locally and keep your PC usable.
+
 Repertory runs a large local model as a service on a machine that is also used for other things. It started as a way
 to scale the model's resources up and down on my cloud gaming machine: when a game needs the GPU or RAM, the model
 scales itself back or pauses, and when the game closes, the model takes the resources back.
