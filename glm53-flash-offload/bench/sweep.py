@@ -14,6 +14,9 @@
 import argparse, json, os, random, statistics, sys, threading, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# a server started by the QwenFlash manager only answers requests carrying its key
+HEADERS = {"Content-Type": "application/json", **({"X-QwenFlash-Key": os.environ["QWENFLASH_BACKEND_KEY"]}
+                                                  if os.environ.get("QWENFLASH_BACKEND_KEY") else {})}
 TOPICS = ["the history of the printing press", "how a jet engine works", "the causes of the French revolution",
           "photosynthesis in C4 plants", "how TCP congestion control works", "the life cycle of stars",
           "how vaccines train the immune system", "the economics of container shipping", "how compilers optimise loops",
@@ -24,7 +27,7 @@ TOPICS = ["the history of the printing press", "how a jet engine works", "the ca
 
 def post(url, payload, first_only=False, timeout=7200):
     req = urllib.request.Request(url + "/generate", data=json.dumps(payload).encode(),
-                                 headers={"Content-Type": "application/json"})
+                                 headers=HEADERS)
     t0 = time.perf_counter(); times = []; last = None
     with urllib.request.urlopen(req, timeout=timeout) as r:
         for raw in r:
@@ -42,7 +45,7 @@ def post(url, payload, first_only=False, timeout=7200):
 
 def tokenize(url, text):
     req = urllib.request.Request(url + "/tokenize", data=json.dumps({"prompt": text}).encode(),
-                                 headers={"Content-Type": "application/json"})
+                                 headers=HEADERS)
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.loads(r.read())["tokens"]
 
@@ -118,7 +121,8 @@ def main():
     bk_path = a.best or os.path.join(HERE, "..", "reference", "best_known.json")
     best_all = json.load(open(bk_path)) if os.path.exists(bk_path) else {}
     best = best_all.get(a.card, {})
-    info = json.loads(urllib.request.urlopen(a.url + "/server_info", timeout=30).read())
+    info = json.loads(urllib.request.urlopen(urllib.request.Request(a.url + "/server_info", headers=HEADERS),
+                                            timeout=30).read())
     ctx_len = int(info.get("context_length") or (info.get("server_args") or {}).get("context_length") or 131072)
     res = {"card": a.card, "config": a.config, "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "ctx_len": ctx_len,
            "protocol": "bench/sweep.py v1", "template": a.template, "tol": a.tol, "best_known_before": best,

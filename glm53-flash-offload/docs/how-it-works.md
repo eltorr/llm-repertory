@@ -344,6 +344,7 @@ GLM-5.3-Flash only.
 | `GLM53_MODE` | `fast` (image default) | `fast`, `exact`, `nvme`, `nvme-exact` |
 | `GLM53_NV_STORE` | `/nvx/glm53_flash_exl3_3.05bpw_experts.bin` | the packed store; its `.json` manifest sits next to it |
 | `GLM53_NV_RAM_GB` | `auto` | RAM tier size; `auto` derives it from the cap (formula above) |
+| `GLM53_NV_RAM_CHUNK` | 128 | RAM tier slots per pinned chunk: what a live resize (`Nv2.resize_ram`) frees or adds at a time |
 | `GLM53_NV_MARGIN_GB` | 3 (1.5 under 24 GiB) | RAM left free inside the cap |
 | `GLM53_NV_MIN_GB` / `GLM53_NV_SMALL_BELOW_GB` | 15 / 24 | refuse below this cap / small-host budget below this cap |
 | `GLM53_RCS_GB` | 1 (small-host only) | `-rcs` value applied by the small-host budget |

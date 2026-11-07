@@ -21,7 +21,7 @@ Env: GLM53_NV_STORE (store .bin), GLM53_NV_RAM_GB (RAM tier; default auto = memo
      GLM53_NV_MARGIN_GB (3), GLM53_NV_THREADS (16), GLM53_NV_PIECE_KB (2304), GLM53_NV_RING (32 slots),
      GLM53_NV_CHECK (1: device check that no pick reads the placeholder), GLM53_NV_WARM (1: RAM warm start by score)
 """
-import collections, concurrent.futures as cf, ctypes, json, mmap, os, re, threading, time
+import bisect, collections, concurrent.futures as cf, ctypes, json, mmap, os, re, threading, time
 import numpy as np
 import torch
 
@@ -312,34 +312,117 @@ def _rcs_bytes():
 
 
 class HostArena:
-    """Page-aligned anon memory, cudaHostRegister(Mapped) per chunk (charged to the memcg when registered)."""
+    """Page-aligned anon memory, cudaHostRegister(Mapped) per chunk (charged to the memcg when registered). Chunks can
+    be added and the last ones freed (grow, shrink_to: nv2's live RAM resize); only the last chunk may be partial at
+    load, so after a grow chunks can differ in size."""
 
-    def __init__(self, nslots, slot_bytes, chunk_slots, dev_idx, tag):
+    def __init__(self, nslots, slot_bytes, chunk_slots, dev_idx, tag, zero=True):
         self.slot = slot_bytes
-        self.n = nslots
         self.cs = chunk_slots
-        self.maps, self.bases = [], []
+        self.dev_idx, self.tag, self.zero = dev_idx, tag, zero
+        self.maps, self.bases, self.sizes, self.starts = [], [], [], []
+        self.n = 0
+        self.addr = np.zeros(0, dtype=np.int64)
+        self.grow(nslots)
+
+    def _alloc(self, k):
         from exllamav3.ext import exllamav3_ext as ext
-        left = nslots
-        while left > 0:
-            k = min(left, chunk_slots)
-            mm = mmap.mmap(-1, k * slot_bytes, flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS)
+        import wsl_pinned
+        if wsl_pinned.needed(self.dev_idx):
+            mm, a = wsl_pinned.alloc(k * self.slot, self.dev_idx, self.tag, zero=self.zero)
+        else:
+            mm = mmap.mmap(-1, k * self.slot, flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS)
             a = ctypes.addressof(ctypes.c_char.from_buffer(mm))
             assert a % 4096 == 0
-            with torch.cuda.device(dev_idx):
-                r = torch.cuda.cudart().cudaHostRegister(a, k * slot_bytes, 2)
-            assert int(r) == 0, f"cudaHostRegister failed ({tag}): {r}"
-            t = torch.frombuffer(mm, dtype=torch.uint8, count=4096)
-            assert ext.pinned_cuda_view(t, dev_idx).data_ptr() == a, "UVA alias != host address"
-            self.maps.append(mm); self.bases.append(a)
+            with torch.cuda.device(self.dev_idx):
+                r = torch.cuda.cudart().cudaHostRegister(a, k * self.slot, 2)
+            if int(r) != 0:
+                mm.close()
+                raise AssertionError(f"cudaHostRegister failed ({self.tag}): {r}")
+        t = torch.frombuffer(mm, dtype=torch.uint8, count=4096)
+        assert ext.pinned_cuda_view(t, self.dev_idx).data_ptr() == a, "UVA alias != host address"
+        return mm, a
+
+    def _free(self, mm, a):
+        import wsl_pinned
+        if wsl_pinned.needed(self.dev_idx):
+            wsl_pinned.free(a, self.dev_idx)
+            return
+        with torch.cuda.device(self.dev_idx):
+            r = torch.cuda.cudart().cudaHostUnregister(a)
+        assert int(r) == 0, f"cudaHostUnregister failed ({self.tag}): {r}"
+        try:
+            mm.close()
+        except BufferError:          # a tensor still views it: hand the pages back, keep the mapping
+            mm.madvise(mmap.MADV_DONTNEED)
+
+    def grow(self, nslots, strict=True):
+        """Add nslots in chunks of chunk_slots; returns the new slots' addresses. strict=False stops at the first chunk
+        that can't be pinned and returns what was added."""
+        new = []
+        left = nslots
+        while left > 0:
+            k = min(left, self.cs)
+            try:
+                mm, a = self._alloc(k)
+            except AssertionError:
+                if strict:
+                    raise
+                break
+            self.starts.append(self.n + len(new))
+            self.maps.append(mm); self.bases.append(a); self.sizes.append(k)
+            new += [a + i * self.slot for i in range(k)]
             left -= k
-        self.addr = np.array([self.bases[s // chunk_slots] + (s % chunk_slots) * slot_bytes for s in range(nslots)],
-                             dtype=np.int64)
+        self.addr = np.concatenate([self.addr, np.asarray(new, dtype=np.int64)])
+        self.n += len(new)
+        return new
+
+    def boundary_at_or_below(self, nslots):
+        """The largest slot count of at most nslots that ends on a chunk boundary (what shrink_to can keep)."""
+        i = bisect.bisect_right(self.starts, max(0, nslots)) - 1
+        if i < 0:
+            return 0
+        end = self.starts[i] + self.sizes[i]
+        return end if end <= nslots else self.starts[i]
+
+    def detach_above(self, nslots):
+        """Take the chunks above nslots (a chunk boundary) out of the arena: (buffer, address, slots) each, in the
+        arena's order. They stay pinned until free_chunks, which may run later on another thread, or go back in with
+        attach. Nothing may use their slots meanwhile."""
+        assert nslots == self.boundary_at_or_below(nslots), f"{nslots} is not on a chunk boundary"
+        out = []
+        while self.n > nslots:
+            k = self.sizes.pop()
+            out.append((self.maps.pop(), self.bases.pop(), k))
+            self.n -= k
+            self.starts.pop()
+        self.addr = self.addr[:self.n].copy()
+        return out[::-1]
+
+    def attach(self, chunks):
+        """Chunks from detach_above back at the end of the arena (still pinned: nothing is allocated). Returns the new
+        slots' addresses."""
+        new = []
+        for mm, a, k in chunks:
+            self.starts.append(self.n + len(new))
+            self.maps.append(mm); self.bases.append(a); self.sizes.append(k)
+            new += [a + i * self.slot for i in range(k)]
+        self.addr = np.concatenate([self.addr, np.asarray(new, dtype=np.int64)])
+        self.n += len(new)
+        return new
+
+    def free_chunks(self, chunks):
+        for mm, a, _ in reversed(chunks):        # the highest first
+            self._free(mm, a)
+
+    def shrink_to(self, nslots):
+        """Free the chunks above nslots (a chunk boundary). Nothing may use their slots any more."""
+        self.free_chunks(self.detach_above(nslots))
 
     def view(self, s):
-        mm = self.maps[s // self.cs]
-        o = (s % self.cs) * self.slot
-        return torch.frombuffer(mm, dtype=torch.uint8, count=self.slot, offset=o)
+        c = bisect.bisect_right(self.starts, s) - 1
+        o = (s - self.starts[c]) * self.slot
+        return torch.frombuffer(self.maps[c], dtype=torch.uint8, count=self.slot, offset=o)
 
 
 # --------------------------------------------------------------------------------------------------------------------

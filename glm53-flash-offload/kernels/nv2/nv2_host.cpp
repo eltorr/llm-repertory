@@ -40,6 +40,7 @@ static inline void cpu_moe_forward(Pool& pool, const Layer& L, const float* x, i
     else moe_forward(pool, L, x, ntok, route, out, mode, pt);
 }
 #include "nv2_shared.h"
+#include "ram_resize.h"
 #include <sys/mman.h>
 #include <fcntl.h>
 
@@ -175,7 +176,8 @@ struct Engine
     std::vector<float> score;
     std::mutex mu; std::condition_variable land_cv;
     int64_t land_tail = 0;
-    struct WbP { int key, s, v; bool issued = false; };
+    // dst: the RAM slot's address, taken under mu (wb_loop copies without the lock; ram_grow may append slots)
+    struct WbP { int key, s, v; bool issued = false; int64_t dst = 0; };
     std::deque<WbP> wb_q; std::mutex wb_mu; std::condition_variable wb_cv; std::atomic<int> wb_inflight{0};
     std::thread wb_th;
     std::vector<int32_t> kvr;   // key -> VRAM ring slot backing it (write-back D2H pending) or -1
@@ -218,6 +220,17 @@ struct Engine
     int st_qd = 24;
     bool st_active = false;
     cudaStream_t wb_stream = nullptr;
+
+    // The RAM tier's slot tables hold room for every expert (more slots than that are never used: an expert has one
+    // at most), so ram_grow appends without moving them: the threads that read an address outside mu (the stage
+    // cache's copy) keep a valid one.
+    size_t ram_cap = 0;
+    void reserve_ram()
+    {
+        ram_cap = size_t(std::max(nram, K)) + 1024;
+        ram_addr.reserve(ram_cap); owner.reserve(ram_cap); pinc.reserve(ram_cap); lprev.reserve(ram_cap);
+        lnext.reserve(ram_cap);
+    }
 
     // ---------------- LRU over slots ----------------
     void lru_remove(int s)
@@ -329,7 +342,7 @@ struct Engine
                 __atomic_store_n(&ram_res[key], 1, __ATOMIC_RELEASE);
                 {
                     std::lock_guard<std::mutex> lw(wb_mu);
-                    wb_q.push_back({ key, s, v });
+                    wb_q.push_back({ key, s, v, false, ram_addr[s] });
                 }
                 wb_cv.notify_one();
                 C.wb_issued++;
@@ -377,7 +390,7 @@ struct Engine
             for (auto& w : pend)
                 if (!w.issued)
                 {
-                    cudaMemcpyAsync((void*) ram_addr[w.s], (const void*) vring_addr[w.v], size_t(slot_bytes), cudaMemcpyDeviceToHost, wb_stream);
+                    cudaMemcpyAsync((void*) w.dst, (const void*) vring_addr[w.v], size_t(slot_bytes), cudaMemcpyDeviceToHost, wb_stream);
                     cudaEventRecord(vr_ev[w.v], wb_stream);
                     w.issued = true;
                 }
@@ -891,6 +904,7 @@ void init(int64_t L, int64_t E, int64_t H, int64_t I, int64_t rec_bytes, int64_t
     e.land = (int32_t*) land; e.home = (volatile int64_t*) home; e.ram_res = (volatile int32_t*) ram_res;
     e.hx = (uint16_t*) hx; e.hout = (float*) hout;
     e.nram = int(ram_addr.numel());
+    e.reserve_ram();
     e.ram_addr.assign(ram_addr.data_ptr<int64_t>(), ram_addr.data_ptr<int64_t>() + e.nram);
     e.pf_ring_addr.assign(pf_ring.data_ptr<int64_t>(), pf_ring.data_ptr<int64_t>() + pf_ring.numel());
     e.pf_ev.resize(e.pf_ring_addr.size()); e.pf_ev_pending.assign(e.pf_ring_addr.size(), 0);
@@ -993,6 +1007,137 @@ int64_t wb_bulk(at::Tensor keys, at::Tensor src)
     }
     e.C.wb_bulk += (long long) done.size();
     return (int64_t) done.size();
+}
+
+// ---- live resize of the RAM tier (Nv2.resize_ram, between requests: the caller has synchronised the device, ended
+// staging and drained the logs, so nothing is pinned and no write-back is pending) ----
+static void ram_idle_check(Engine& e)
+{
+    TORCH_CHECK(!e.st_active, "RAM resize: prefill staging is active");
+    {
+        std::lock_guard<std::mutex> lw(e.wb_mu);
+        TORCH_CHECK(e.wb_q.empty() && e.wb_inflight.load() == 0, "RAM resize: a write-back is still pending");
+    }
+    for (int s = 0; s < e.nram; ++s) TORCH_CHECK(e.pinc[s] == 0, "RAM resize: RAM slot ", s, " is in use");
+    for (int k = 0; k < e.K; ++k) TORCH_CHECK(e.kvr[k] < 0, "RAM resize: a write-back is still pending");
+}
+
+// Shrink to n_keep slots: the n_keep most recently used experts stay, moved into slots below n_keep (ram_resize.h);
+// the rest are dropped (they are on NVMe). The caller frees the memory above n_keep afterwards.
+// Returns {dropped, moved, resident}.
+std::vector<int64_t> ram_shrink(int64_t n_keep, double wait_s, int64_t threads)
+{
+    Engine& e = *G;
+    std::unique_lock<std::mutex> lk(e.mu);
+    // reads started for the last request (prefetch hints) land first: they write into their slot without the lock
+    const bool landed = e.land_cv.wait_for(lk, std::chrono::duration<double>(wait_s), [&] {
+        for (int k = 0; k < e.K; ++k) if (e.kst[k] == KS_INFLIGHT) return false;
+        return true; });
+    TORCH_CHECK(landed, "RAM resize: NVMe reads still in flight after ", wait_s, " s");
+    ram_idle_check(e);
+    n_keep = std::max<int64_t>(0, std::min<int64_t>(n_keep, e.nram));
+    int resident = 0;
+    for (int k = 0; k < e.K; ++k) resident += e.kst[k] == KS_RES;
+    if (n_keep == e.nram) return { 0, 0, resident };
+    const nv2r::ShrinkPlan p = nv2r::plan_shrink(int(n_keep), e.owner, e.lprev, e.lru_new);
+    TORCH_CHECK(p.ok, "RAM resize: a RAM slot is held by a read in flight");
+    for (int s : p.evict) { e.evict_key(e.owner[s]); e.C.evictions--; }    // not capacity evictions
+    // the kept experts' bytes first (memory to memory, several threads), then their slots
+    const int nt = int(std::max<int64_t>(1, std::min<int64_t>(threads, (int64_t) p.moves.size())));
+    std::vector<std::thread> th;
+    for (int t = 0; t < nt; ++t)
+        th.emplace_back([&e, &p, t, nt] {
+            for (size_t i = size_t(t); i < p.moves.size(); i += size_t(nt))
+                std::memcpy((void*) e.ram_addr[p.moves[i].second], (const void*) e.ram_addr[p.moves[i].first],
+                            size_t(e.slot_bytes));
+        });
+    for (auto& x : th) x.join();
+    for (auto [from, to] : p.moves)
+    {
+        const int key = e.owner[from];
+        e.owner[to] = key; e.slot_of[key] = to;
+        e.set_home(key, e.ram_addr[to]);          // ram_res stays 1: the bytes are already there
+        const int pv = e.lprev[from], nx = e.lnext[from];      // same place in the LRU list
+        e.lprev[to] = pv; e.lnext[to] = nx;
+        if (pv >= 0) e.lnext[pv] = to; else e.lru_old = to;
+        if (nx >= 0) e.lprev[nx] = to; else e.lru_new = to;
+        e.lprev[from] = e.lnext[from] = -1;
+        e.owner[from] = SL_FREE;
+    }
+    e.nram = int(n_keep);
+    e.ram_addr.resize(size_t(n_keep)); e.owner.resize(size_t(n_keep)); e.pinc.resize(size_t(n_keep));
+    e.lprev.resize(size_t(n_keep)); e.lnext.resize(size_t(n_keep));
+    e.freel.clear();
+    for (int s = e.nram - 1; s >= 0; --s) if (e.owner[s] == SL_FREE) e.freel.push_back(s);
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+    return { (int64_t) p.evict.size(), (int64_t) p.moves.size(), resident - (int64_t) p.evict.size() };
+}
+
+// Grow by slots at these addresses (a new pinned chunk): free, they fill as experts are read. Safe while requests
+// run: everything that uses the slot tables holds mu, and they never move (reserve_ram). Returns the slot count.
+int64_t ram_grow(at::Tensor addrs)
+{
+    Engine& e = *G;
+    TORCH_CHECK(!addrs.is_cuda() && addrs.scalar_type() == at::kLong && addrs.is_contiguous(),
+                "ram_grow: addresses must be contiguous CPU int64");
+    std::lock_guard<std::mutex> lk(e.mu);
+    const int64_t* a = addrs.data_ptr<int64_t>();
+    const int n = int(addrs.numel()), n0 = e.nram;
+    TORCH_CHECK(size_t(n0 + n) <= e.ram_cap, "ram_grow: more RAM slots than experts (", n0 + n, " > ", e.ram_cap, ")");
+    for (int i = 0; i < n; ++i)
+    {
+        e.ram_addr.push_back(a[i]); e.owner.push_back(SL_FREE); e.pinc.push_back(0);
+        e.lprev.push_back(-1); e.lnext.push_back(-1);
+    }
+    for (int s = n0 + n - 1; s >= n0; --s) e.freel.push_back(s);
+    e.nram = n0 + n;
+    return e.nram;
+}
+
+// test-only engine (no CUDA, no readers): a RAM tier over host memory at these slot addresses, so ram_shrink and
+// ram_grow can be checked without a GPU (tests/test_nv2_ram_resize.py)
+void ram_test_engine(int64_t L, int64_t E, int64_t slot_bytes, at::Tensor addrs)
+{
+    TORCH_CHECK(G == nullptr, "nv2 engine already initialised");
+    G = new Engine();
+    Engine& e = *G;
+    e.L = int(L); e.E = int(E); e.K = int(L * E); e.slot_bytes = slot_bytes; e.ph = 0;
+    static std::vector<int64_t> home_mem, hc_mem(HC_N, 0);
+    static std::vector<int32_t> res_mem;
+    home_mem.assign(size_t(e.K) * 3, 0); res_mem.assign(size_t(e.K), 0);
+    e.home = home_mem.data(); e.ram_res = res_mem.data(); e.hc = hc_mem.data();
+    e.nram = int(addrs.numel());
+    e.reserve_ram();
+    e.ram_addr.assign(addrs.data_ptr<int64_t>(), addrs.data_ptr<int64_t>() + e.nram);
+    e.slot_of.assign(e.K, -1); e.kvr.assign(e.K, -1); e.kst.assign(e.K, KS_NONE); e.karr.assign(e.K, 0);
+    e.prot.assign(e.K, 0);
+    e.owner.assign(e.nram, SL_FREE); e.pinc.assign(e.nram, 0); e.lprev.assign(e.nram, -1); e.lnext.assign(e.nram, -1);
+    for (int s = e.nram - 1; s >= 0; --s) e.freel.push_back(s);
+}
+// test-only: key lands in a free slot (as a finished NVMe read does: newest in the LRU list); returns the slot
+int64_t ram_test_land(int64_t key)
+{
+    Engine& e = *G;
+    std::lock_guard<std::mutex> lk(e.mu);
+    TORCH_CHECK(e.kst[key] == KS_NONE, "already resident");
+    const int s = e.take_slot();
+    TORCH_CHECK(s >= 0, "no free slot");
+    e.owner[s] = int(key); e.slot_of[key] = s; e.kst[key] = KS_RES; e.lru_push_new(s);
+    e.set_home(int(key), e.ram_addr[s]);
+    e.ram_res[key] = 1;
+    return s;
+}
+// test-only: the LRU list oldest first (keys), and each key's home address and landed flag
+std::vector<at::Tensor> ram_test_lists()
+{
+    Engine& e = *G;
+    std::lock_guard<std::mutex> lk(e.mu);
+    std::vector<int64_t> lru;
+    for (int s = e.lru_old; s >= 0; s = e.lnext[s]) lru.push_back(e.owner[s]);
+    std::vector<int64_t> home(size_t(e.K)), res(size_t(e.K));
+    for (int k = 0; k < e.K; ++k) { home[k] = e.home[int64_t(k) * 3]; res[k] = e.ram_res[k]; }
+    auto t = [](std::vector<int64_t>& v) { return torch::from_blob(v.data(), { (int64_t) v.size() }, torch::kInt64).clone(); };
+    return { t(lru), t(home), t(res) };
 }
 
 // sync drain of device logs (call after torch.cuda.synchronize, e.g. before verify / elastic)
@@ -1253,6 +1398,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     m.def("warm_read", &warm_read, py::call_guard<py::gil_scoped_release>());
     m.def("drop_keys", &drop_keys);
     m.def("wb_bulk", &wb_bulk, py::call_guard<py::gil_scoped_release>());
+    m.def("ram_shrink", &ram_shrink, py::call_guard<py::gil_scoped_release>());
+    m.def("ram_grow", &ram_grow);
+    m.def("ram_capacity", [] { return (int64_t) G->ram_cap; });
+    m.def("ram_test_engine", &ram_test_engine);
+    m.def("ram_test_land", &ram_test_land);
+    m.def("ram_test_lists", &ram_test_lists);
     m.def("drain_all", &drain_all);
     m.def("state", &state);
     m.def("read_sync", &read_sync, py::call_guard<py::gil_scoped_release>());

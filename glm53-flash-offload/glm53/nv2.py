@@ -16,7 +16,8 @@ Per MoE layer call with <= GLM53_EC_STAGE_MIN picks (decode, small forwards), no
   combine  waits for the CPU job (bounded), adds its fp32 partial
 Prefill (>= stage_min picks): staging buffers filled on the copy stream from RAM slots (pinned for the forward) and,
 for NVMe-only experts, from a pinned FIFO ring that a reader fills several layers ahead (GLM53_NV_PF_RING slots).
-Env: GLM53_NV_RAM_GB (auto), GLM53_NV_MARGIN_GB (3), GLM53_NV_THREADS (16 readers), GLM53_NV_PIECE_KB (2304),
+Env: GLM53_NV_RAM_GB (auto), GLM53_NV_RAM_CHUNK (128 slots per pinned chunk: the unit of resize_ram),
+     GLM53_NV_MARGIN_GB (3), GLM53_NV_THREADS (16 readers), GLM53_NV_PIECE_KB (2304),
      GLM53_NV_PF_RING (192), GLM53_NV_PF_QD (24), GLM53_NV_EXCL (1), GLM53_NV_ELASTIC_WB (1), GLM53_NV_LAND (64),
      GLM53_NV_FREE_LO (96), GLM53_NV_CPU (0: S2; 1: S3 CPU tier), GLM53_NV_NVCPU (0), GLM53_NV_CPU_CPUS (2-23),
      GLM53_NV_CPU_MODE (-1 auto), GLM53_NV_CLAMP (1: swiglu clamp on the CPU share, B004 fix), GLM53_NV_POL (cost model
@@ -71,11 +72,15 @@ def _mapped(nbytes, dev_idx, tag):
     """One page-aligned anon region, cudaHostRegister(Mapped); UVA alias == host address (checked)."""
     from exllamav3.ext import exllamav3_ext as xe
     nbytes = (nbytes + 4095) // 4096 * 4096
-    mm = mmap.mmap(-1, nbytes, flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS)
-    a = ctypes.addressof(ctypes.c_char.from_buffer(mm))
-    with torch.cuda.device(dev_idx):
-        r = torch.cuda.cudart().cudaHostRegister(a, nbytes, 2)
-    assert int(r) == 0, f"cudaHostRegister failed ({tag}): {r}"
+    import wsl_pinned
+    if wsl_pinned.needed(dev_idx):
+        mm, a = wsl_pinned.alloc(nbytes, dev_idx, tag)
+    else:
+        mm = mmap.mmap(-1, nbytes, flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS)
+        a = ctypes.addressof(ctypes.c_char.from_buffer(mm))
+        with torch.cuda.device(dev_idx):
+            r = torch.cuda.cudart().cudaHostRegister(a, nbytes, 2)
+        assert int(r) == 0, f"cudaHostRegister failed ({tag}): {r}"
     t = torch.frombuffer(mm, dtype=torch.uint8, count=nbytes)
     assert xe.pinned_cuda_view(t[:4096], dev_idx).data_ptr() == a, "UVA alias != host address"
     t.zero_()
@@ -174,7 +179,9 @@ class Nv2:
             nram = int(float(want) * GiB // self.slot)
         NT._log(f"nv2: rcs reserve {NT._rcs_bytes() / GiB:.1f} GiB, margin {margin / GiB:.1f} GiB, prefill ring {ring_pf} "
                 f"slots ({ring_pf * self.slot / GiB:.2f} GiB) -> RAM tier {nram} slots ({nram * self.slot / GiB:.2f} GiB)")
-        self.ram = NT.HostArena(nram, self.slot, 512, dev_idx, "ram")
+        # chunks of GLM53_NV_RAM_CHUNK slots (~0.3 GB): the unit a live resize frees or adds (resize_ram)
+        # (not zero-filled: a slot's bytes are always written before it holds an expert)
+        self.ram = NT.HostArena(nram, self.slot, int(g("GLM53_NV_RAM_CHUNK", "128")), dev_idx, "ram", zero=False)
         self.nram = nram
         self.pf = NT.HostArena(ring_pf, self.slot, ring_pf, dev_idx, "pfring")
         NT._log(f"nv2: RAM arena + prefill ring registered")
@@ -454,6 +461,11 @@ class Nv2:
         self.selftest = self._selftest(lim)
         NT._log(f"nv2 CPU tier: {threads} threads on {cpus[0]}-{cpus[-1]}, mode {mode}, swiglu clamp {lim}, selftest "
                 f"{self.selftest}")
+        # EXACT should match exllamav3's own dequantised weights to fp16 rounding; far more means a wrong decode
+        limit = float(os.environ.get("GLM53_NV_CPU_SELFTEST_MAX", "0.02"))
+        if not self.selftest.get("EXACT", 1.0) <= limit:
+            raise RuntimeError(f"nv2 CPU tier self-test failed: EXACT error {self.selftest.get('EXACT')} > {limit}; "
+                               f"start without the CPU tier (GLM53_NV_CPU=0)")
         e.cpu_start(cpus[0])
         self.cpu_mode, self.cpu_lim = mode, lim
 
@@ -521,6 +533,68 @@ class Nv2:
         n = ext().wb_bulk(torch.tensor(keys, dtype=torch.int64), torch.tensor(src, dtype=torch.int64)) if keys else 0
         self.st["elastic_wb"] += n; self.st["elastic_wb_ms"] += (time.perf_counter() - t) * 1e3
         return n
+
+    # ---- live resize of the RAM tier (a wrapper server between requests) ---------------------------
+    RAM_MIN_BYTES = GiB
+
+    def can_resize_ram(self):
+        return hasattr(ext(), "ram_shrink")
+
+    def ram_target_slots(self, target_bytes):
+        """Slots for a RAM cache of about target_bytes: at least RAM_MIN_BYTES, at most one per expert."""
+        cap = int(ext().ram_capacity()) if hasattr(ext(), "ram_capacity") else self.K
+        return max(int(self.RAM_MIN_BYTES // self.slot), min(cap, self.K, int(target_bytes // self.slot)))
+
+    def shrink_ram(self, target_bytes):
+        """Shrink the RAM tier to about target_bytes (whole chunks, never above it), between requests: the caller
+        makes sure no forward is running. The most recently used experts stay (moved out of the chunks that go); the
+        rest are dropped (they are on NVMe). Returns (report, chunks): the chunks are out of the tier and go back to
+        the system with free_ram_chunks, which may run later on another thread."""
+        p, e = self.pool, ext()
+        t = time.perf_counter()
+        p._end_prefill()
+        torch.cuda.synchronize(self.dev)
+        e.drain_all()
+        before, dropped, moved, chunks = self.nram, 0, 0, []
+        keep = self.ram.boundary_at_or_below(self.ram_target_slots(target_bytes))
+        if keep < self.nram:
+            dropped, moved, _ = e.ram_shrink(keep, 10.0, 8)
+            chunks = self.ram.detach_above(keep)
+            self.nram = self.ram.n
+            # pointer rows of experts not in VRAM: from their new homes, as after the warm start
+            e.nv_rows_all(self.L, self.E, p.slotof, self.a["home"], p.tabs)
+            torch.cuda.synchronize(self.dev)
+            self.st["ram_shrinks"] += 1
+        return ({"ram_slots_before": before, "ram_slots": self.nram, "ram_bytes_before": before * self.slot,
+                 "ram_bytes": self.nram * self.slot, "dropped": int(dropped), "moved": int(moved),
+                 "ms": round((time.perf_counter() - t) * 1e3, 1)}, chunks)
+
+    def free_ram_chunks(self, chunks):
+        self.ram.free_chunks(chunks)
+
+    def reattach_ram_chunks(self, chunks):
+        """Chunks a shrink took out and that are not freed yet, back into the RAM tier (a grow right after a shrink):
+        still pinned, so nothing is allocated, and they land where they were. The slots are free, as after a grow.
+        Returns the slots added."""
+        new = self.ram.attach(chunks)
+        if new:
+            ext().ram_grow(torch.tensor(new, dtype=torch.int64))
+            self.nram = self.ram.n
+            self.st["ram_reused_chunks"] += len(chunks)
+        return len(new)
+
+    def grow_ram_step(self, target_slots, step=None):
+        """Add one chunk toward target_slots (of step slots; default, a whole chunk), while requests run
+        (ext().ram_grow appends under the engine's lock): the new slots are free and fill as experts are read. Returns
+        the slots added; 0 at the target, or if pinned memory ran out."""
+        if self.nram >= target_slots:
+            return 0
+        new = self.ram.grow(min(step or self.ram.cs, self.ram.cs, target_slots - self.nram), strict=False)
+        if new:
+            ext().ram_grow(torch.tensor(new, dtype=torch.int64))
+            self.nram = self.ram.n
+            self.st["ram_grow_chunks"] += 1
+        return len(new)
 
     # ---- staged prefill (called from Pool._stage_hook_nv2 on the main thread) --------------------------------------
     def stage_submit(self, li, b):
@@ -678,3 +752,4 @@ def finish(model):
 
 def summary():
     return NV.summary() if NV is not None else None
+

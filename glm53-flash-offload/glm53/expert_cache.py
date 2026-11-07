@@ -33,6 +33,7 @@ in their GatedMLP (not cached).
 import json, os, time
 import numpy as np
 import torch
+import vram_arena
 
 _SRC = r"""
 #include <torch/extension.h>
@@ -335,6 +336,13 @@ class Pool:
             free = min(free, int(frac * total) - torch.cuda.memory_reserved(device))
         # staging buffer: one layer's non-cached experts at most (stage_bytes < 0: "auto" = exactly that)
         nst = self.E if stage_bytes < 0 else min(self.E, int(stage_bytes // self.rec)) if stage_bytes > 0 else 0
+        if 0 < nst < self.E:
+            # nv2's full staging copies all of a layer's non-cached experts at once (it asserts len(miss) <=
+            # stage_n at the first prefill), so a stage smaller than a layer can't work: 4-bit experts need
+            # 512 x 2.46 MB, more than a byte budget tuned for 3-bit ones
+            print(f"expert_cache: staging {stage_bytes / 1024 ** 3:.2f} GiB holds {nst} experts < {self.E} per "
+                  f"layer; using {self.E * self.rec / 1024 ** 3:.2f} GiB", flush=True)
+            nst = self.E
         self.stage_n = nst
         self.elastic = float(os.environ.get("GLM53_EC_ELASTIC_GB", "0")) * 1024 ** 3
         self.stage = None
@@ -356,20 +364,24 @@ class Pool:
                 break
         S = len(self.chunks) * self.spc
         self.S = S
-        self.cbase = torch.tensor([t.data_ptr() for t in self.chunks] or [0], dtype=torch.int64, device=device)
-        self.flex = []
-        if self.elastic and self.chunks:
-            nflex = min(len(self.chunks), int(-(-self.elastic // (self.spc * self.rec))))
-            self.flex = list(range(len(self.chunks) - nflex, len(self.chunks)))
+        L = len(mods)
+        # The per-slot tables are sized for every expert, so resize() can grow the arena past its size at load
+        # (a model started lean, say). The kernels only ever see the first S slots.
+        self.cap = max(S, -(-L * self.E // self.spc) * self.spc)
+        self.cbase = torch.zeros((max(1, self.cap // self.spc),), dtype=torch.int64, device=device)
+        if self.chunks:
+            self.cbase[:len(self.chunks)] = torch.tensor([t.data_ptr() for t in self.chunks], dtype=torch.int64)
+        self.reserve = reserve
+        self.flex = vram_arena.flex_chunks(len(self.chunks), self.elastic, self.spc * self.rec)
         self.flex_all = list(self.flex)
         self.in_prefill = False
         self.elastic_stats = {"enter": 0, "exit": 0, "realloc_fail": 0}
-        L = len(mods)
+        self.resize_stats = {"resizes": 0, "last": None}
         i32 = dict(dtype=torch.int32, device=device)
         self.slotof = torch.full((L, self.E), -1, **i32)
-        self.owner = torch.full((max(S, 1),), -1, **i32)
-        self.refb = torch.zeros((max(S, 1),), **i32)
-        self.pin = torch.zeros((max(S, 1),), **i32)
+        self.owner = torch.full((self.cap,), -1, **i32)
+        self.refb = torch.zeros((self.cap,), **i32)
+        self.pin = torch.zeros((self.cap,), **i32)
         self.ctl = torch.zeros((4,), **i32)
         self.jobs = torch.zeros((2 * 1024,), **i32)
         self.stats = torch.zeros((8,), dtype=torch.int64, device=device)
@@ -409,6 +421,8 @@ class Pool:
             self.pending = None
         for li, m in enumerate(mods):
             m._ec = (self, li)
+        # what torch holds besides the arena once loaded; anything it keeps beyond this later came out of the reserve
+        self.base_reserved = torch.cuda.memory_reserved(device) - self.S * self.rec
 
     # ---- prefill staging -------------------------------------------------------------------------------------
     def _restore(self, li):
@@ -650,6 +664,92 @@ class Pool:
         self.in_prefill = False
         self.elastic_stats["exit"] += 1
 
+    # ---- live resize -----------------------------------------------------------------------------------------
+    def _end_prefill(self):
+        """What the first decode step after a prefill does (the staging hook, called with no picks): the staged
+        layers' rows back home, the host's staging closed (its RAM pins released), the elastic chunks back. A prefill
+        cut short, by a client that left, never gets that step; a resize must not free the staging under it."""
+        if self.stage_n:
+            hook = (self._stage_hook_nv2 if self.nv2 is not None else
+                    self._stage_hook_nv if self.nv is not None else self._stage_hook)
+            hook(-1, 0)
+        elif self.in_prefill:
+            self._elastic_exit()
+
+    def resize(self, limit_bytes=None, max_slots=None, reserve_bytes=None, elastic_bytes=None, measure_used=None):
+        """Grow or shrink the arena with the model loaded, as the arena is sized at load: what the device-wide
+        limit_bytes leaves after the VRAM in use and the reserve, capped at max_slots (vram_arena.target_slots).
+
+        Only between forwards: the server calls it with the generator idle. Shrinking writes the experts that are
+        only in VRAM back to the RAM tier (nv2 exclusive mode, as elastic prefill does), points their tables home,
+        and frees the top chunks; growing adds empty chunks that decode fills as it admits experts. measure_used(dev)
+        gives the device's VRAM in use, every process (NVML); without it (or if it returns None), CUDA's view plus
+        GLM53_VRAM_UNSEEN_BYTES."""
+        t0 = time.perf_counter()
+        e = _ext()
+        self._end_prefill()
+        torch.cuda.synchronize(self.device)
+        for c, t in enumerate(self.chunks):       # a flex chunk _elastic_exit couldn't reallocate: try again
+            if t is None:
+                try:
+                    self.chunks[c] = torch.empty((self.spc, self.rec), dtype=torch.uint8, device=self.device)
+                except torch.OutOfMemoryError:
+                    continue
+                self.cbase[c] = self.chunks[c].data_ptr()
+                e.ec_evict(c * self.spc, (c + 1) * self.spc, 0, self.E, self.owner, self.slotof, self.home, self.tabs,
+                           self.refb, self.pin)
+        torch.cuda.synchronize(self.device)
+        torch.cuda.empty_cache()
+        free, total = torch.cuda.mem_get_info(self.device)
+        used = measure_used(self.device.index or 0) if measure_used is not None else None
+        if used is None:
+            used = total - free + int(os.environ.get("GLM53_VRAM_UNSEEN_BYTES", "0"))
+        arena = sum(t is not None for t in self.chunks) * self.spc * self.rec
+        held = torch.cuda.memory_reserved(self.device) - arena - self.base_reserved
+        reserve = vram_arena.reserve_left(self.reserve if reserve_bytes is None else reserve_bytes, held)
+        have = self.S
+        want = vram_arena.target_slots(have, self.rec, self.spc, self.cap, used if limit_bytes is not None else None,
+                                       limit_bytes, reserve, max_slots)
+        written_back, alloc_fail = 0, False
+        if want < have:
+            c0 = want // self.spc
+            if self.nv2 is not None:
+                written_back = self.nv2.elastic_writeback([c for c in range(c0, len(self.chunks))
+                                                           if self.chunks[c] is not None])
+            e.ec_evict(want, have, 1, self.E, self.owner, self.slotof, self.home, self.tabs, self.refb, self.pin)
+            torch.cuda.synchronize(self.device)
+            del self.chunks[c0:]
+            self.cbase[c0:] = 0
+            self.ctl[0] = 0                          # the CLOCK hand must stay inside the arena
+            self.S = want
+            torch.cuda.synchronize(self.device)
+            torch.cuda.empty_cache()
+        elif want > have:
+            for c in range(len(self.chunks), want // self.spc):
+                try:
+                    t = torch.empty((self.spc, self.rec), dtype=torch.uint8, device=self.device)
+                except torch.OutOfMemoryError:
+                    alloc_fail = True
+                    break
+                self.chunks.append(t)
+                self.cbase[c] = t.data_ptr()
+            new = len(self.chunks) * self.spc
+            e.ec_evict(have, new, 0, self.E, self.owner, self.slotof, self.home, self.tabs, self.refb, self.pin)
+            torch.cuda.synchronize(self.device)
+            self.S = new
+        if self.elastic and elastic_bytes:
+            # only a pool that was elastic at load (otherwise its staging buffers are allocated for good), and never
+            # to 0: an elastic pool allocates its staging buffers only from what it lends
+            self.elastic = float(elastic_bytes)
+        self.flex_all = vram_arena.flex_chunks(len(self.chunks), self.elastic, self.spc * self.rec)
+        self.flex = list(self.flex_all)
+        r = {"device": str(self.device), "slots_before": have, "slots": self.S, "arena_bytes": self.S * self.rec,
+             "reserve_bytes": int(reserve), "written_back": written_back, "alloc_fail": alloc_fail,
+             "ms": round((time.perf_counter() - t0) * 1e3, 1)}
+        self.resize_stats["resizes"] += 1
+        self.resize_stats["last"] = r
+        return r
+
     def _timing_collect(self):
         """Per-layer copy (staging) vs compute ms of the last prefill forward: copy = copy-stream span of the layer's
         staging; compute = gap between consecutive layer hooks on the compute stream (MoE + attention of a layer)."""
@@ -723,7 +823,7 @@ class Pool:
     def summary(self):
         s = self.stats.tolist()
         return {"device": str(self.device), "layers": len(self.mods), "slots": self.S, "slot_bytes": self.rec,
-                "arena_gb": round(self.S * self.rec / 1e9, 2),
+                "arena_gb": round(self.S * self.rec / 1e9, 2), "capacity_slots": self.cap, "resize": self.resize_stats,
                 "elastic": dict(self.elastic_stats, flex_chunks=len(self.flex), flex_gb=round(len(self.flex) * self.spc * self.rec / 1e9, 2), in_prefill=self.in_prefill) if self.elastic else None,
                 "mem_alloc_gb": round(torch.cuda.memory_allocated(self.device) / 1e9, 2),
                 "mem_peak_gb": round(torch.cuda.max_memory_allocated(self.device) / 1e9, 2), "hits": s[0], "misses": s[1], "admitted": s[2],
@@ -849,6 +949,11 @@ def attach_modules(mods):
 
 def summary():
     return [p.summary() for p in POOLS]
+
+
+def resize(**kw):
+    """Live resize of each GPU's arena (Pool.resize); the caller makes sure no forward is running."""
+    return [p.resize(**kw) for p in POOLS]
 
 
 def verify():
