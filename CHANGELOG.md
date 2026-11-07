@@ -39,4 +39,8 @@ models on a PC that is also used for other things, with one adapter per engine.
   the earlier fork served, for five greedy requests from a short answer to a 30K-token document
   ([report](research/engine-parity/REPORT.md)). Found on its first start: under WSL2, `cudaHostAlloc` can hand back
   an unaligned address for a small request; the engine now aligns it.
+- **Engines and models** ([docs](docs/engines.md)): the engine runs Qwen3.8-Flash-Next and GLM-5.3-Flash; Repertory
+  offers Qwen so far. What runs compiled and what in Python, and what is still open.
+- **The model server uses this checkout's ExLlamaV3** (`run.sh` puts it first on `PYTHONPATH`), even with a
+  Python environment that has another copy installed.
 - **License:** MIT for Repertory's own code.

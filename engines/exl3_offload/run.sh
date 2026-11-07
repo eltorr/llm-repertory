@@ -14,6 +14,9 @@
 set -euo pipefail
 SELF=$(readlink -f "$0")
 cd "$(dirname "$SELF")/../.."
+# this checkout's ExLlamaV3 first, ahead of any copy the Python environment has installed (an environment shared
+# with another checkout would otherwise load that checkout's)
+export PYTHONPATH="$PWD/exllamav3${PYTHONPATH:+:$PYTHONPATH}"
 [ -f /etc/profile.d/cuda.sh ] && source /etc/profile.d/cuda.sh
 [ -d /usr/lib/wsl/lib ] && case ":$PATH:" in *:/usr/lib/wsl/lib:*) ;; *) PATH="$PATH:/usr/lib/wsl/lib" ;; esac
 GB=1000000000

@@ -43,7 +43,7 @@ The dashboard opens at http://127.0.0.1:30000, the same port as the API. In its 
 Then point any OpenAI-compatible client at `http://127.0.0.1:30000/v1`, with model `qwen3.8-flash-next` and any
 API key. The model loads on the first request, which takes about a minute.
 
-More: [manager guide](docs/manager.md) · [API](docs/api.md) · [run records](research/README.md)
+More: [manager guide](docs/manager.md) · [API](docs/api.md) · [engines and models](docs/engines.md) · [run records](research/README.md)
 
 ## The catalog
 
