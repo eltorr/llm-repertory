@@ -14,7 +14,7 @@ import os
 import torch
 
 _RT = None
-_KEEP = []          # allocations live until free() (a RAM tier shrink), like the mmaps they replace
+_KEEP = {}          # page-aligned address -> what cudaHostAlloc returned; live until free(), like the mmaps they replace
 _NEEDED = {}
 _ATTR_CAN_USE_HOST_PTR_FOR_REGISTERED = 91
 _HOST_ALLOC_PORTABLE, _HOST_ALLOC_MAPPED = 1, 2
@@ -51,20 +51,32 @@ def alloc(nbytes, dev_idx, tag, zero=True):
     """Zero-filled (zero=False: as the driver hands it over), page-aligned, pinned+mapped host region. Returns
     (buffer, address)."""
     nbytes = (int(nbytes) + 4095) // 4096 * 4096
-    p = ctypes.c_void_p()
-    with torch.cuda.device(dev_idx):
-        r = _rt().cudaHostAlloc(ctypes.byref(p), ctypes.c_size_t(nbytes), _HOST_ALLOC_PORTABLE | _HOST_ALLOC_MAPPED)
-    assert r == 0 and p.value, f"cudaHostAlloc failed ({tag}, {nbytes} B): {r}"
-    assert p.value % 4096 == 0
+
+    def host_alloc(n):
+        p = ctypes.c_void_p()
+        with torch.cuda.device(dev_idx):
+            r = _rt().cudaHostAlloc(ctypes.byref(p), ctypes.c_size_t(n), _HOST_ALLOC_PORTABLE | _HOST_ALLOC_MAPPED)
+        assert r == 0 and p.value, f"cudaHostAlloc failed ({tag}, {n} B): {r}"
+        return p.value
+    base = host_alloc(nbytes)
+    if base % 4096:
+        # cudaHostAlloc doesn't promise page alignment: small requests can come from a shared pool. Ask for a page
+        # more and use the first page boundary in it (the whole allocation is identity-mapped, so is that).
+        _free(base, dev_idx)
+        base = host_alloc(nbytes + 4096)
+    a = (base + 4095) // 4096 * 4096
     if zero:
-        ctypes.memset(p.value, 0, nbytes)   # anon mmap is zero-filled; keep that guarantee
-    _KEEP.append(p.value)
-    return (ctypes.c_uint8 * nbytes).from_address(p.value), p.value
+        ctypes.memset(a, 0, nbytes)   # anon mmap is zero-filled; keep that guarantee
+    _KEEP[a] = base
+    return (ctypes.c_uint8 * nbytes).from_address(a), a
+
+
+def _free(base, dev_idx):
+    with torch.cuda.device(dev_idx):
+        r = _rt().cudaFreeHost(ctypes.c_void_p(base))
+    assert r == 0, f"cudaFreeHost failed: {r}"
 
 
 def free(addr, dev_idx):
     """Give back a region from alloc() (nv2's live RAM resize). Nothing may use it any more."""
-    with torch.cuda.device(dev_idx):
-        r = _rt().cudaFreeHost(ctypes.c_void_p(addr))
-    assert r == 0, f"cudaFreeHost failed: {r}"
-    _KEEP.remove(addr)
+    _free(_KEEP.pop(addr), dev_idx)
