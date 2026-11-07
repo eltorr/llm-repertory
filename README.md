@@ -1,8 +1,8 @@
 # Repertory
 
-Repertory runs a large local model as a service on a PC that is also used for other things. It started because my
-AI machine is also my gaming PC: when a game needs the GPU or RAM, the model scales itself back or pauses, and when
-the game closes, the model takes the resources back.
+Repertory runs a large local model as a service on a machine that is also used for other things. It started as a way
+to scale the model's resources up and down on my cloud gaming machine: when a game needs the GPU or RAM, the model
+scales itself back or pauses, and when the game closes, the model takes the resources back.
 
 Today it serves Qwen3.8-Flash-Next, a 125B mixture-of-experts model, at up to 256K context on cards from 8 to 48 GB.
 The experts that don't fit in VRAM are kept in RAM and on the SSD. Clients use an OpenAI-compatible API at

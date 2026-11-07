@@ -7,7 +7,7 @@ What changed in Repertory, newest first.
 - The README is reorganized: quick start, how to use it (clients, games, other devices, benchmarks, updating), the
   parts it's built from, dashboard screenshots, presets and a short table of measured speeds. Every measured
   configuration moved to [docs/measured.md](docs/measured.md). The preset table says "measured" or "not tested yet"
-  in words.
+  in words. The opening tells how it started: scaling the model's resources up and down on a cloud gaming machine.
 - The dashboard's prompt speed counts only the prompt tokens the model processed, not the ones the prompt cache
   served (a follow-up in a long conversation showed 15,000 tok/s), and an answer that arrives in one piece, such as
   a tool call, no longer shows an impossible generation speed.
