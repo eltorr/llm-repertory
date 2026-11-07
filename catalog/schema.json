@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/eltorr/repertory/blob/main/catalog/schema.json",
+  "$id": "https://github.com/eltorr/llm-repertory/blob/main/catalog/schema.json",
   "title": "Engine and model catalog",
   "description": "What the manager can install and run: engines fetched from a git repo at a pinned commit, models fetched from Hugging Face at a pinned revision, and how to prepare, serve and steer each pair. Draft 1.",
   "type": "object",

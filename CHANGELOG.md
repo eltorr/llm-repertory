@@ -4,6 +4,8 @@ What changed in Repertory, newest first.
 
 ## 2026-11-07: docs and dashboard
 
+- The repository is now `eltorr/llm-repertory` (the old address redirects); the product, the package and the
+  command stay `repertory`. A fresh clone lands in `llm-repertory/`.
 - The README is reorganized: quick start, how to use it (clients, games, other devices, benchmarks, updating), the
   parts it's built from, dashboard screenshots, presets and a short table of measured speeds. Every measured
   configuration moved to [docs/measured.md](docs/measured.md). The preset table says "measured" or "not tested yet"

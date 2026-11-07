@@ -21,16 +21,16 @@ installing Python. On Linux, setup automates Ubuntu 22.04+ and Debian 12+.
 Windows:
 
 ```powershell
-git clone https://github.com/eltorr/repertory.git
-cd repertory
+git clone https://github.com/eltorr/llm-repertory.git
+cd llm-repertory
 .\Repertory.cmd
 ```
 
 Linux:
 
 ```bash
-git clone https://github.com/eltorr/repertory.git
-cd repertory
+git clone https://github.com/eltorr/llm-repertory.git
+cd llm-repertory
 ./repertory.sh open
 ```
 
