@@ -850,13 +850,18 @@ class Service:
         # chat: prompt/completion_tokens; Responses: input/output_tokens
         pt = token_count(u.get("prompt_tokens"), u.get("input_tokens"))
         ct = token_count(u.get("completion_tokens"), u.get("output_tokens"))
+        # tokens the prefix cache served (chat: prompt_tokens_details; Responses: input_tokens_details) weren't
+        # processed: prompt speed counts only the ones that were
+        details = u.get("prompt_tokens_details") or u.get("input_tokens_details") or {}
+        cached = min(pt, token_count(details.get("cached_tokens") if isinstance(details, dict) else None, None))
+        new = pt - cached
         ttft = (stats.t_first - t_send) if stats.t_first else None
         decode_s = (t_end - stats.t_first) if stats.t_first else None
         self.metrics.append({
-            "t": t_end, "prompt": pt, "completion": ct, "wait_s": round(t_send - t0, 2),
+            "t": t_end, "prompt": pt, "cached": cached, "completion": ct, "wait_s": round(t_send - t0, 2),
             "ttft_s": round(ttft, 3) if ttft is not None else None, "total_s": round(t_end - t_send, 2),
             "decode_tps": round(ct / decode_s, 1) if decode_s and ct > 8 else None,
-            "prefill_tps": round(pt / ttft) if ttft and pt > 256 else None,
+            "prefill_tps": round(new / ttft) if ttft and new > 256 else None,
             "tier": self.be.tier, "budget_gb": round((self.be.budget or 0) / GB, 1), "cold": was_held})
 
     def metrics_summary(self):

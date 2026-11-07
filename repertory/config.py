@@ -138,7 +138,8 @@ def legacy_state_dir():
 
 def import_legacy():
     """The first start on a PC that ran QwenFlash: take over its config.json (every setting, and the dashboard token,
-    so the private link and signed-in devices keep working) and learned.json (the limits it learned). Only while
+    so the private link and signed-in devices keep working), learned.json (the limits it learned) and bench/ (its
+    benchmark runs, for the Benchmark tab's history). Only while
     Repertory has no config.json of its own, so it happens once. On Windows, Repertory keeps an engine checkout of its
     own (it never takes over QwenFlash's, which may still be serving): QwenFlash's is remembered as legacy_engine_dir,
     where setup finds the models and stores to link. True if it imported."""
@@ -157,8 +158,22 @@ def import_legacy():
     save_config(data)
     if (old / "learned.json").is_file() and not (STATE / "learned.json").exists():
         shutil.copy2(old / "learned.json", STATE / "learned.json")
+    import_bench_history(old)
     log.info("imported QwenFlash's settings from %s", old)
     return True
+
+
+def import_bench_history(old):
+    """QwenFlash's benchmark runs into Repertory's bench/ (only runs Repertory doesn't have; nothing is replaced)."""
+    src = old / "bench"
+    if not src.is_dir():
+        return 0
+    n = 0
+    for run in src.iterdir():
+        if run.is_dir() and not (STATE / "bench" / run.name).exists():
+            shutil.copytree(run, STATE / "bench" / run.name)
+            n += 1
+    return n
 
 
 def load_config():

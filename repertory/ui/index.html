@@ -766,6 +766,8 @@ async function poll() {
 (async () => {
   try { await loadConfig(); } catch { $("banner").style.display = "block"; }
   await poll();
+  const linked = decodeURIComponent(location.hash.slice(1));   // #setup, #bench...: open that tab
+  if (linked && document.querySelector(`.tabs button[data-tab="${CSS.escape(linked)}"]`)) showTab(linked);
   setInterval(poll, 1500);
   window.addEventListener("resize", () => { if (S && S.history) renderChart(); });
   setInterval(async () => { if (tab === "setup" || (S && S.setup_running)) { try { await pollSetup(); } catch {} } }, 1000);

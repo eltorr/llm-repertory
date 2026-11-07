@@ -34,6 +34,8 @@ class ImportTests(unittest.TestCase):
         (self.legacy / "config.json").write_text(json.dumps({"dashboard_token": "kept-token", "quant": "4.05",
                                                               "network_port": 8080, "repo_dir": ""}))
         (self.legacy / "learned.json").write_text(json.dumps({"GPU|4.05|262144": {"vram_cap": 2.0e10}}))
+        (self.legacy / "bench" / "20261105-224719").mkdir(parents=True)
+        (self.legacy / "bench" / "20261105-224719" / "results.jsonl").write_text("{}")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -48,6 +50,7 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(cfg["repo_dir"], "")      # Repertory's own engine checkout, never QwenFlash's
         self.assertEqual(cfg["legacy_engine_dir"], "/root/qwen-flash" if sys.platform == "win32" else "")
         self.assertTrue((self.home / "config.json").exists())
+        self.assertTrue((self.home / "bench" / "20261105-224719" / "results.jsonl").exists())   # its benchmark runs
 
     def test_only_once(self):
         start(self.home, self.legacy)
