@@ -331,9 +331,14 @@ class Pool:
                     assert l.inner.trellis.numel() * l.inner.trellis.element_size() == s and s % 16 == 0
         torch.cuda.synchronize(device); torch.cuda.empty_cache()
         free, total = torch.cuda.mem_get_info(device)
+        used = total - free
         frac = torch.cuda.get_per_process_memory_fraction(device) if hasattr(torch.cuda, "get_per_process_memory_fraction") else 1.0
         if frac < 1.0:   # torch's allocator refuses past frac * total: size the arena (and leave the reserve) inside it
             free = min(free, int(frac * total) - torch.cuda.memory_reserved(device))
+        limit = os.environ.get("GLM53_VRAM_LIMIT_BYTES")
+        if limit:   # a device-wide limit, as NVML counts VRAM: the CUDA context, other allocators and other processes
+            # (GLM53_VRAM_UNSEEN_BYTES: what CUDA doesn't report here, e.g. Windows apps under WSL2) all count
+            free = min(free, int(limit) - used - int(os.environ.get("GLM53_VRAM_UNSEEN_BYTES", "0")))
         # staging buffer: one layer's non-cached experts at most (stage_bytes < 0: "auto" = exactly that)
         nst = self.E if stage_bytes < 0 else min(self.E, int(stage_bytes // self.rec)) if stage_bytes > 0 else 0
         if 0 < nst < self.E:

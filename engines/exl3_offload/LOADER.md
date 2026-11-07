@@ -66,6 +66,8 @@ Every other setting is the engine's own `GLM53_*` flag with the engine's default
 |---|---|---|
 | `GLM53_EC_RESERVE_GB` | `2.5` | VRAM left free after the expert cache (activations, prefill) |
 | `GLM53_EC_MAX_SLOTS` | none | cap on the VRAM expert cache, in experts |
+| `GLM53_VRAM_LIMIT_BYTES` | none | a device-wide VRAM limit, as NVML counts it (the CUDA context, other processes): the expert cache sizes itself to what is left of it. The model server sets it from the manager's `QWEN_VRAM_LIMIT_BYTES` |
+| `GLM53_VRAM_UNSEEN_BYTES` | `0` | VRAM other processes use that CUDA doesn't report to this one (Windows apps under WSL2), counted against that limit |
 | `GLM53_EC_ELASTIC_GB` | `0` | VRAM of the cache handed back to torch for each prefill |
 | `GLM53_EC_WARM` | none | JSON `{layer key: [score per expert]}` for the initial RAM and VRAM fill. Without it both tiers are filled in expert order. |
 | `GLM53_NV_PREFETCH` | `0` | `1`: read the next layer's predicted experts one layer early (decode) |

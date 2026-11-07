@@ -654,6 +654,8 @@ def measure_vram():
     device = torch.cuda.current_device()
     os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "%d.%d" % torch.cuda.get_device_capability(device))
     free, total = torch.cuda.mem_get_info(device)
+    if os.environ.get("QWEN_VRAM_LIMIT_BYTES"):   # the manager's device-wide limit: the expert cache sizes itself to it
+        os.environ.setdefault("GLM53_VRAM_LIMIT_BYTES", os.environ["QWEN_VRAM_LIMIT_BYTES"])
     if "GLM53_VRAM_UNSEEN_BYTES" not in os.environ:
         unseen = memory_guard.unseen_vram(free, total, device)
         if unseen is not None:
