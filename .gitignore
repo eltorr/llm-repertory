@@ -1,5 +1,6 @@
 # Python environments, caches and build output
-.venv/
+# (no trailing slashes on the environment, models and stores: in an engine checkout they can be symlinks)
+.venv
 .venv-manager/
 .venv-scan/
 .ruff_cache/
@@ -11,9 +12,9 @@ __pycache__/
 /exllamav3/exllamav3_ext*.so
 
 # Models, expert stores and the engine's runtime state (setup/50_model.sh, bin/repertory-backend)
-/model/
-/model-*/
-/store/
+/model
+/model-*
+/store
 /.repertory/
 
 # Left in an engine checkout by the versions before Repertory: never committed, never swept into a stash
