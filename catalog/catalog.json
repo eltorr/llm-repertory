@@ -254,7 +254,176 @@
         }
       ],
       "cpu_execution": "experimental",
-      "offer_untested": true
+      "offer_untested": true,
+      "curation": {
+        "status": "curated",
+        "date": "2026-11-07",
+        "machine": {
+          "gpu": "NVIDIA GeForce RTX 5090",
+          "vram_gb": 34.19,
+          "ram_gb": 68.3,
+          "platform": "windows-wsl"
+        },
+        "engine_commit": "ada4493a7c52b107e0f5f148b78f12124417a891",
+        "checks": {
+          "compat": {
+            "ok": true,
+            "date": "2026-11-07",
+            "engine_commit": "ada4493a7c52b107e0f5f148b78f12124417a891",
+            "machine": {
+              "gpu": "NVIDIA GeForce RTX 5090",
+              "vram_gb": 34.2,
+              "ram_gb": 68.3,
+              "platform": "windows-wsl",
+              "os": "Windows 11 (build 10.0.26200)"
+            },
+            "items": [
+              {
+                "name": "entry",
+                "ok": true,
+                "detail": "valid against catalog/schema.json"
+              },
+              {
+                "name": "engine",
+                "ok": true,
+                "detail": "exl3-offload on windows-wsl: NVIDIA GeForce RTX 5090 (sm_120, 32 GB), driver 617.14"
+              },
+              {
+                "name": "pin",
+                "ok": true,
+                "detail": "turboderp/Qwen3.8-Flash-Next-exl3 at 69e33439ae95 (branch 3.05bpw_h5_ng5)"
+              },
+              {
+                "name": "architecture",
+                "ok": true,
+                "detail": "Qwen4ExpForConditionalGeneration (qwen4_exp), exl3 3.05 bits, from the downloaded folder"
+              },
+              {
+                "name": "fits",
+                "ok": true,
+                "detail": "256K context, 10,112 experts in 29.5 GB of VRAM, a 21 GiB RAM cache: 91% of the experts in memory"
+              },
+              {
+                "name": "files",
+                "ok": true,
+                "detail": "25 files, each checked against its hash (the pinned revision's list); store store/qwen.bin packed"
+              }
+            ],
+            "numbers": {
+              "vram_budget_gb": 29.5,
+              "ram_gb": 68.3,
+              "context": 262144,
+              "prefill_chunk": 24576,
+              "staging": true,
+              "vram_experts": 10112,
+              "ram_cache_gib": 21,
+              "in_memory_pct": 90.9
+            },
+            "summary": "compatible"
+          },
+          "regression": {
+            "ok": true,
+            "date": "2026-11-07",
+            "items": [
+              {
+                "name": "short",
+                "ok": true,
+                "detail": "KL mean 0 (at most 0.002), max 0; top-1 agreement 81/81, none flipped; decode took the forward pass's likeliest token at 79/81 positions (off at most 10%), the others at most 0.078 nat below it (at most 1); the answer token's logprob moved 0 on average, at most 0; text identical"
+              },
+              {
+                "name": "code",
+                "ok": true,
+                "detail": "KL mean 0 (at most 0.002), max 0; top-1 agreement 262/262, none flipped; decode took the forward pass's likeliest token at 261/262 positions (off at most 10%), the others at most 0.062 nat below it (at most 1); the answer token's logprob moved 0 on average, at most 0; text identical"
+              },
+              {
+                "name": "tool",
+                "ok": true,
+                "detail": "KL mean 0 (at most 0.002), max 0; top-1 agreement 40/40, none flipped; decode took the forward pass's likeliest token at 40/40 positions (off at most 10%), the others at most 0 nat below it (at most 1); the answer token's logprob moved 0 on average, at most 0; text identical"
+              },
+              {
+                "name": "document",
+                "ok": true,
+                "detail": "names Ilsa Varga and PERIWINKLE; text identical"
+              },
+              {
+                "name": "reasoning",
+                "ok": true,
+                "detail": "KL mean 0 (at most 0.002), max 0; top-1 agreement 58/58, none flipped; decode took the forward pass's likeliest token at 58/58 positions (off at most 10%), the others at most 0 nat below it (at most 1); the answer token's logprob moved 0 on average, at most 0; text identical"
+              },
+              {
+                "name": "decode",
+                "ok": true,
+                "detail": "49.0 tok/s against 50.8 (-3.6%; at most 15% slower passes)"
+              },
+              {
+                "name": "prefill",
+                "ok": true,
+                "detail": "6,219.2 tok/s against 6,370.9 (-2.4%; at most 10% slower passes)"
+              }
+            ],
+            "engine_commit": "ada4493a7c52b107e0f5f148b78f12124417a891",
+            "machine": {
+              "gpu": "NVIDIA GeForce RTX 5090",
+              "vram_gb": 34.19,
+              "ram_gb": 68.3,
+              "platform": "windows-wsl"
+            },
+            "numbers": {
+              "kl_mean_limit": 0.002,
+              "tie_gap_limit": 1.0,
+              "off_top_limit": 0.1,
+              "short_top1": 1.0,
+              "short_decode_off_share": 0.0247,
+              "short_flip_gap_max": 0.0,
+              "short_kl_mean": 0.0,
+              "short_kl_max": 0.0,
+              "short_logprob_delta_mean": 0.0,
+              "short_logprob_delta_max": 0.0,
+              "short_decode_gap_max": 0.078,
+              "code_top1": 1.0,
+              "code_decode_off_share": 0.0038,
+              "code_flip_gap_max": 0.0,
+              "code_kl_mean": 0.0,
+              "code_kl_max": 0.0,
+              "code_logprob_delta_mean": 0.0,
+              "code_logprob_delta_max": 0.0,
+              "code_decode_gap_max": 0.062,
+              "tool_top1": 1.0,
+              "tool_decode_off_share": 0.0,
+              "tool_flip_gap_max": 0.0,
+              "tool_kl_mean": 0.0,
+              "tool_kl_max": 0.0,
+              "tool_logprob_delta_mean": 0.0,
+              "tool_logprob_delta_max": 0.0,
+              "tool_decode_gap_max": 0.0,
+              "reasoning_top1": 1.0,
+              "reasoning_decode_off_share": 0.0,
+              "reasoning_flip_gap_max": 0.0,
+              "reasoning_kl_mean": 0.0,
+              "reasoning_kl_max": 0.0,
+              "reasoning_logprob_delta_mean": 0.0,
+              "reasoning_logprob_delta_max": 0.0,
+              "reasoning_decode_gap_max": 0.0,
+              "identical": "5/5",
+              "decode_tolerance_pct": 15,
+              "prefill_tolerance_pct": 10,
+              "decode_tps": 49.02,
+              "decode_ref_tps": 50.84,
+              "decode_change_pct": -3.6,
+              "prefill_tps": 6219.2,
+              "prefill_ref_tps": 6370.9,
+              "prefill_change_pct": -2.4,
+              "context": 262144,
+              "ram_gib": 22,
+              "vram_gb": 29.0,
+              "vram_experts": 9760,
+              "startup_s": 62.9,
+              "vram_experts_ref": 9760
+            },
+            "summary": "answers within the tolerance (5/5 identical as text), speed within the tolerance"
+          }
+        }
+      }
     },
     {
       "id": "qwen3.8-flash-next-exl3-4.05",
@@ -337,7 +506,176 @@
         }
       ],
       "cpu_execution": "none",
-      "offer_untested": true
+      "offer_untested": true,
+      "curation": {
+        "status": "curated",
+        "date": "2026-11-07",
+        "machine": {
+          "gpu": "NVIDIA GeForce RTX 5090",
+          "vram_gb": 34.19,
+          "ram_gb": 68.3,
+          "platform": "windows-wsl"
+        },
+        "engine_commit": "ada4493a7c52b107e0f5f148b78f12124417a891",
+        "checks": {
+          "compat": {
+            "ok": true,
+            "date": "2026-11-07",
+            "engine_commit": "ada4493a7c52b107e0f5f148b78f12124417a891",
+            "machine": {
+              "gpu": "NVIDIA GeForce RTX 5090",
+              "vram_gb": 34.2,
+              "ram_gb": 68.3,
+              "platform": "windows-wsl",
+              "os": "Windows 11 (build 10.0.26200)"
+            },
+            "items": [
+              {
+                "name": "entry",
+                "ok": true,
+                "detail": "valid against catalog/schema.json"
+              },
+              {
+                "name": "engine",
+                "ok": true,
+                "detail": "exl3-offload on windows-wsl: NVIDIA GeForce RTX 5090 (sm_120, 32 GB), driver 617.14"
+              },
+              {
+                "name": "pin",
+                "ok": true,
+                "detail": "turboderp/Qwen3.8-Flash-Next-exl3 at 55a732e0c4c3 (branch 4.05bpw_h6_ng6)"
+              },
+              {
+                "name": "architecture",
+                "ok": true,
+                "detail": "Qwen4ExpForConditionalGeneration (qwen4_exp), exl3 4.05 bits, from the downloaded folder"
+              },
+              {
+                "name": "fits",
+                "ok": true,
+                "detail": "256K context, 7,392 experts in 29.5 GB of VRAM, a 34 GiB RAM cache: 91% of the experts in memory"
+              },
+              {
+                "name": "files",
+                "ok": true,
+                "detail": "27 files, each checked against its hash (the pinned revision's list); store store/qwen405.bin packed"
+              }
+            ],
+            "numbers": {
+              "vram_budget_gb": 29.5,
+              "ram_gb": 68.3,
+              "context": 262144,
+              "prefill_chunk": 24576,
+              "staging": true,
+              "vram_experts": 7392,
+              "ram_cache_gib": 34,
+              "in_memory_pct": 90.5
+            },
+            "summary": "compatible"
+          },
+          "regression": {
+            "ok": true,
+            "date": "2026-11-07",
+            "items": [
+              {
+                "name": "short",
+                "ok": true,
+                "detail": "KL mean 0 (at most 0.002), max 0; top-1 agreement 92/92, none flipped; decode took the forward pass's likeliest token at 91/92 positions (off at most 10%), the others at most 0.11 nat below it (at most 1); the answer token's logprob moved 0 on average, at most 0; text identical"
+              },
+              {
+                "name": "code",
+                "ok": true,
+                "detail": "KL mean 0 (at most 0.002), max 0; top-1 agreement 262/262, none flipped; decode took the forward pass's likeliest token at 262/262 positions (off at most 10%), the others at most 0 nat below it (at most 1); the answer token's logprob moved 0 on average, at most 0; text identical"
+              },
+              {
+                "name": "tool",
+                "ok": true,
+                "detail": "KL mean 0 (at most 0.002), max 0; top-1 agreement 28/28, none flipped; decode took the forward pass's likeliest token at 28/28 positions (off at most 10%), the others at most 0 nat below it (at most 1); the answer token's logprob moved 0 on average, at most 0; text identical"
+              },
+              {
+                "name": "document",
+                "ok": true,
+                "detail": "names Ilsa Varga and PERIWINKLE; text identical"
+              },
+              {
+                "name": "reasoning",
+                "ok": true,
+                "detail": "KL mean 0 (at most 0.002), max 0; top-1 agreement 58/58, none flipped; decode took the forward pass's likeliest token at 58/58 positions (off at most 10%), the others at most 0 nat below it (at most 1); the answer token's logprob moved 0 on average, at most 0; text identical"
+              },
+              {
+                "name": "decode",
+                "ok": true,
+                "detail": "42.9 tok/s against 43.2 (-0.9%; at most 15% slower passes)"
+              },
+              {
+                "name": "prefill",
+                "ok": true,
+                "detail": "6,209.2 tok/s against 5,896.7 (+5.3%; at most 10% slower passes)"
+              }
+            ],
+            "engine_commit": "ada4493a7c52b107e0f5f148b78f12124417a891",
+            "machine": {
+              "gpu": "NVIDIA GeForce RTX 5090",
+              "vram_gb": 34.19,
+              "ram_gb": 68.3,
+              "platform": "windows-wsl"
+            },
+            "numbers": {
+              "kl_mean_limit": 0.002,
+              "tie_gap_limit": 1.0,
+              "off_top_limit": 0.1,
+              "short_top1": 1.0,
+              "short_decode_off_share": 0.0109,
+              "short_flip_gap_max": 0.0,
+              "short_kl_mean": 0.0,
+              "short_kl_max": 0.0,
+              "short_logprob_delta_mean": 0.0,
+              "short_logprob_delta_max": 0.0,
+              "short_decode_gap_max": 0.11,
+              "code_top1": 1.0,
+              "code_decode_off_share": 0.0,
+              "code_flip_gap_max": 0.0,
+              "code_kl_mean": 0.0,
+              "code_kl_max": 0.0,
+              "code_logprob_delta_mean": 0.0,
+              "code_logprob_delta_max": 0.0,
+              "code_decode_gap_max": 0.0,
+              "tool_top1": 1.0,
+              "tool_decode_off_share": 0.0,
+              "tool_flip_gap_max": 0.0,
+              "tool_kl_mean": 0.0,
+              "tool_kl_max": 0.0,
+              "tool_logprob_delta_mean": 0.0,
+              "tool_logprob_delta_max": 0.0,
+              "tool_decode_gap_max": 0.0,
+              "reasoning_top1": 1.0,
+              "reasoning_decode_off_share": 0.0,
+              "reasoning_flip_gap_max": 0.0,
+              "reasoning_kl_mean": 0.0,
+              "reasoning_kl_max": 0.0,
+              "reasoning_logprob_delta_mean": 0.0,
+              "reasoning_logprob_delta_max": 0.0,
+              "reasoning_decode_gap_max": 0.0,
+              "identical": "5/5",
+              "decode_tolerance_pct": 15,
+              "prefill_tolerance_pct": 10,
+              "decode_tps": 42.85,
+              "decode_ref_tps": 43.22,
+              "decode_change_pct": -0.9,
+              "prefill_tps": 6209.2,
+              "prefill_ref_tps": 5896.7,
+              "prefill_change_pct": 5.3,
+              "context": 262144,
+              "ram_gib": 35,
+              "vram_gb": 29.0,
+              "vram_experts": 7136,
+              "startup_s": 74.0,
+              "vram_experts_ref": 7136
+            },
+            "summary": "answers within the tolerance (5/5 identical as text), speed within the tolerance"
+          }
+        }
+      }
     }
   ]
 }
