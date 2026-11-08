@@ -13,6 +13,14 @@
         "self": true,
         "subdir": "engines/exl3_offload"
       },
+      "supports": {
+        "architectures": [
+          "Qwen4ExpForConditionalGeneration"
+        ],
+        "formats": [
+          "exl3"
+        ]
+      },
       "requires": {
         "platforms": [
           "linux-x86_64",
@@ -168,6 +176,7 @@
     {
       "id": "qwen3.8-flash-next-exl3-3.05",
       "family": "qwen3.8-flash-next",
+      "quant": "3.05",
       "label": "3.05 bpw (fastest)",
       "source": {
         "huggingface": "turboderp/Qwen3.8-Flash-Next-exl3",
@@ -249,6 +258,7 @@
     {
       "id": "qwen3.8-flash-next-exl3-4.05",
       "family": "qwen3.8-flash-next",
+      "quant": "4.05",
       "label": "4.05 bpw (higher fidelity)",
       "source": {
         "huggingface": "turboderp/Qwen3.8-Flash-Next-exl3",
