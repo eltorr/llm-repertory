@@ -76,10 +76,10 @@ After a warm-up it sends five fixed requests, greedy, each answer to its natural
   on.
 
 They are compared with the model's reference, `catalog/reference/<model-id>.json`:
-- **Answers, token by token.** Exact text would be too strict: the engine's MoE path can add the experts' outputs
-  in an order that follows where they sit (VRAM or RAM), so the last bits of one run differ from the next, and where
-  two tokens are nearly tied a greedy answer can flip and go its own way. On the 3.05 bpw quant, two fresh runs
-  minutes apart gave different text in three of the five cases. So after the timed requests, the run replays the
+- **Answers, token by token.** The engine gives the same answers run after run, but exact text would fail any
+  change that moves logits in their last bits (the CPU lane computing some experts, a kernel adding them in another
+  order, a new exllamav3): where two tokens are nearly tied, a greedy answer flips and goes its own way, which text
+  can't tell from a real regression. So after the timed requests, the run replays the
   reference: each answer but the document's is fed to the model as the reference's own token ids after its prompt
   (teacher forcing: one forward pass, through the engine's `/generate`), and at each position the model's 20
   likeliest tokens are compared with the reference's. Per answer:

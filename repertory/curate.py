@@ -54,10 +54,10 @@ DECODE_TOLERANCE = 0.15
 # Prefill: the 73K-token document's first token came within 2.5% across four runs (12.39-12.70 s,
 # research/engine-parity), and 32-64K documents within 0.3-6.7% between trials; 10%.
 PREFILL_TOLERANCE = 0.10
-# The answers are compared token by token, not as text. The engine's MoE path can add the experts' outputs in an order
-# that follows where they sit (VRAM or RAM), so the last bits differ from one run to the next, and where two tokens are
-# nearly tied a greedy answer can flip and go its own way from there: on the 3.05 bpw quant, two fresh runs minutes
-# apart gave different text in three of the five cases. So each short case's reference answer, as token ids, is
+# The answers are compared token by token, not as text. The engine gives the same answers run after run, but a change
+# that moves logits in their last bits (the CPU lane computing some experts, a kernel adding them in another order, a
+# new exllamav3) can flip a near tie, and a greedy answer goes its own way from there: exact text would fail such a
+# change, and can't tell it from a real regression. So each short case's reference answer, as token ids, is
 # teacher-forced on the run (bench.Bench.replay_steps), and each position's distribution (its bench.REFERENCE_TOP
 # likeliest tokens) is compared with the reference's:
 # - KL(reference || run), over the tokens either list holds, both renormalised over them. A token missing from one list
