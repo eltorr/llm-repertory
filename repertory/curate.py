@@ -3,7 +3,7 @@
     python -m repertory curate                                    the catalog's models and their curation state
     python -m repertory curate MODEL [--checks compat|regression|all] [--record] [--no-write] [--json]
 
-MODEL is a model's id (qwen3.8-flash-next-exl3-4.05) or its quant (4.05).
+MODEL is a model's id (qwen3.8-flash-next-exl3-4.05, glm-5.3-flash-exl3-3.05) or its quant (4.05, glm-3.05).
 
 compat      No GPU. The entry validates; its engine is in the catalog, runs on this platform, GPU and driver, and
             supports the model's architecture and format (config.json from the downloaded folder, else from Hugging
@@ -341,13 +341,42 @@ def architecture_item(model, engine, files, hub):
         why.append(f"config.json says {quant['quant_method']}, the entry {model['format']}")
     if quant.get("bits") is not None and abs(float(quant["bits"]) - model["bpw"]) > 0.005:
         why.append(f"config.json says {quant['bits']} bits, the entry {model['bpw']} bpw")
-    for key, fact in (("num_experts", "experts_per_layer"), ("num_experts_per_tok", "experts_per_token")):
+    for key, fact in (("num_experts", "experts_per_layer"), ("n_routed_experts", "experts_per_layer"),
+                      ("num_experts_per_tok", "experts_per_token")):
         value = cfg.get(key, text.get(key))
         if value is not None and value != facts[fact]:
             why.append(f"config.json's {key} is {value}, the entry's {fact} {facts[fact]}")
+    layers = moe_layers(text or cfg)
+    if layers is not None and layers != facts["moe_layers"]:
+        why.append(f"config.json has {layers} MoE layers, the entry's moe_layers {facts['moe_layers']}")
+    mtp = mtp_layers(text or cfg)
+    if mtp is not None and "mtp" in facts and bool(mtp) != facts["mtp"]:
+        why.append(f"config.json has {mtp} MTP layer(s), the entry's mtp is {str(facts['mtp']).lower()}")
     detail = (f"{', '.join(archs)} ({cfg.get('model_type')}), {quant.get('quant_method', '?')} "
               f"{quant.get('bits', '?')} bits, from {where}")
     return item("architecture", not why, "; ".join(why) if why else detail)
+
+
+def moe_layers(text):
+    """The main model's MoE layers as config.json's text config describes them (the MTP layer aside): those its
+    mlp_layer_types call sparse (GLM-5.3), else every layer past the first_k_dense_replace dense ones (every layer for
+    Qwen3.8); None when it doesn't say."""
+    n = text.get("num_hidden_layers")
+    kinds = text.get("mlp_layer_types")
+    if isinstance(kinds, list) and isinstance(n, int):
+        return sum(1 for k in kinds[:n] if k == "sparse")
+    if not isinstance(n, int):
+        return None
+    return n - int(text.get("first_k_dense_replace") or 0) - len(text.get("mlp_only_layers") or ())
+
+
+def mtp_layers(text):
+    """The MTP draft layers config.json names (GLM-5.3: num_nextn_predict_layers, Qwen3.8: mtp_num_hidden_layers), or
+    None."""
+    for key in ("num_nextn_predict_layers", "mtp_num_hidden_layers"):
+        if isinstance(text.get(key), int):
+            return text[key]
+    return None
 
 
 def fits_item(model, machine, cfg):
@@ -778,10 +807,10 @@ def report(model, rec, results, written):
 
 
 def listing(cat):
-    rows = [f"{'model':<34} {'quant':<6} {'status':<9} {'checked':<10} offered"]
+    rows = [f"{'model':<34} {'quant':<8} {'status':<9} {'checked':<10} offered"]
     for m in cat.models:
         c = m.get("curation") or {}
-        rows.append(f"{m['id']:<34} {m['quant']:<6} {catalog.status(m):<9} {c.get('date', '-'):<10} "
+        rows.append(f"{m['id']:<34} {m['quant']:<8} {catalog.status(m):<9} {c.get('date', '-'):<10} "
                     f"{'yes' if catalog.offered(m) else 'no'}" + ("" if c else " (no curation yet)"))
     return "\n".join(rows)
 

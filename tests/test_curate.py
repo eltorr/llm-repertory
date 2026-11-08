@@ -34,7 +34,9 @@ KEY = "test-key"
 GIB = 1024 ** 3
 DATA = json.loads(catalog.CATALOG.read_text(encoding="utf-8"))
 M305, M405 = "qwen3.8-flash-next-exl3-3.05", "qwen3.8-flash-next-exl3-4.05"
+MGLM = "glm-5.3-flash-exl3-3.05"
 REPO_ID = "turboderp/Qwen3.8-Flash-Next-exl3"
+GLM_REPO = "turboderp/GLM-5.3-Flash-exl3"
 REV = {m["id"]: m["source"]["revision"] for m in DATA["models"]}
 
 
@@ -49,6 +51,16 @@ def config_json(bits=3.05, archs=("Qwen4ExpForConditionalGeneration",), experts=
                        "quantization_config": {"quant_method": "exl3", "bits": bits}}).encode()
 
 
+def glm_config_json(bits=3.05, experts=288, dense=3, mtp=1):
+    """GLM-5.3-Flash's config.json as far as curation reads it (the pinned revision's values)."""
+    return json.dumps({"architectures": ["Glm5NextForConditionalGeneration"], "model_type": "glm5_next",
+                       "text_config": {"model_type": "glm5_next_text", "n_routed_experts": experts,
+                                       "num_experts_per_tok": 8, "num_hidden_layers": 45, "first_k_dense_replace": 3,
+                                       "mlp_layer_types": ["dense"] * dense + ["sparse"] * (45 - dense),
+                                       "num_nextn_predict_layers": mtp},
+                       "quantization_config": {"quant_method": "exl3", "bits": bits}}).encode()
+
+
 class FakeHub:
     """Hugging Face: each model's pinned revision with its files (config.json and a weights file), and its branch."""
 
@@ -57,21 +69,24 @@ class FakeHub:
         self.files = {}
         self.revisions = {}
         for m in DATA["models"]:
-            cfg, weights = config_json(m["bpw"]), b"weights of " + m["id"].encode()
+            glm = m["family"] == "glm-5.3-flash"
+            cfg = glm_config_json(m["bpw"]) if glm else config_json(m["bpw"])
+            weights = b"weights of " + m["id"].encode()
             files = {"config.json": cfg, "model.safetensors": weights}
             self.files.update({(REV[m["id"]], n): b for n, b in files.items()})
             info = {"sha": REV[m["id"]], "siblings": [
                 {"rfilename": "config.json", "blobId": blob_id(cfg)},
                 {"rfilename": "model.safetensors", "blobId": "x",
                  "lfs": {"sha256": hashlib.sha256(weights).hexdigest()}}]}
-            self.revisions[REV[m["id"]]] = info
-            self.revisions[m["source"]["branch"]] = info
+            repo = m["source"]["huggingface"]
+            self.revisions[(repo, REV[m["id"]])] = info
+            self.revisions[(repo, m["source"]["branch"])] = info
 
     def revision(self, repo, rev):
         self.asked.append(("revision", repo, rev))
         if self.offline:
             raise OSError("no network")
-        return self.revisions.get(rev) if repo == REPO_ID else None
+        return self.revisions.get((repo, rev))
 
     def file(self, repo, rev, name):
         self.asked.append(("file", repo, rev, name))
@@ -96,7 +111,7 @@ def download(root, model, hub, verified=True):
     folder = Path(root) / model["paths"]["model_dir"]
     folder.mkdir(parents=True)
     rec = {}
-    for s in hub.revisions[REV[model["id"]]]["siblings"]:
+    for s in hub.revisions[(model["source"]["huggingface"], REV[model["id"]])]["siblings"]:
         (folder / s["rfilename"]).write_bytes(hub.files[(REV[model["id"]], s["rfilename"])])
         rec[s["rfilename"]] = (s.get("lfs") or {}).get("sha256") or s["blobId"]
     if verified:
@@ -178,7 +193,7 @@ class CompatTests(unittest.TestCase):
         self.assertIn("has no revision ffff", by_name(r)["pin"]["detail"])
 
     def test_a_branch_that_moved_on_is_reported_not_failed(self):
-        self.hub.revisions["4.05bpw_h6_ng6"] = {"sha": "a" * 40}
+        self.hub.revisions[(REPO_ID, "4.05bpw_h6_ng6")] = {"sha": "a" * 40}
         p = by_name(self.check())["pin"]
         self.assertTrue(p["ok"])
         self.assertIn("has moved on to aaaa", p["detail"])
@@ -211,6 +226,54 @@ class CompatTests(unittest.TestCase):
         self.assertFalse(f["ok"])
         self.assertIn("not enough RAM", f["detail"])
         self.assertTrue(by_name(self.check(M305, machine=rtx5090(ram_gib=32, platform="linux")))["fits"]["ok"])
+
+    def test_glm_on_this_pc(self):
+        # not downloaded: its config.json from the Hub at its own repository's pin, its facts as config.json says
+        r = self.check(MGLM)
+        self.assertTrue(r["ok"], r)
+        items = by_name(r)
+        self.assertEqual(items["architecture"]["detail"], "Glm5NextForConditionalGeneration (glm5_next), exl3 3.05 "
+                                                          "bits, from Hugging Face at the pinned revision")
+        self.assertIn(("file", GLM_REPO, REV[MGLM], "config.json"), self.hub.asked)
+        self.assertIn("turboderp/GLM-5.3-Flash-exl3 at 332ab457b709 (branch 3.05bpw)", items["pin"]["detail"])
+        # it fits the RTX 5090 with 64 GB at the largest context the manager runs, about half of it in VRAM + RAM
+        n = r["numbers"]
+        self.assertEqual((n["context"], n["prefill_chunk"], n["staging"]), (262144, 16384, True))
+        self.assertTrue(1500 < n["vram_experts"] < 2000, n)
+        self.assertTrue(40 < n["in_memory_pct"] < 60, n)
+        self.assertTrue(items["fits"]["ok"])
+        # a card too small for staging and its 5.4 GB of staging buffers: staging-free; too small even for that: no
+        f = curate.fits_item(catalog.load().model(MGLM), rtx5090(vram_total=16 * GIB * 0.995), self.cfg)[1]
+        self.assertFalse(f["staging"])
+        self.assertFalse(by_name(self.check(MGLM, machine=rtx5090(vram_total=8 * GIB * 0.995)))["fits"]["ok"])
+
+    def test_glm_downloaded(self):
+        folder = download(self.root, catalog.load().model(MGLM), self.hub)
+        r = self.check(MGLM)
+        items = by_name(r)
+        self.assertTrue(r["ok"], r)
+        self.assertIn("from the downloaded folder", items["architecture"]["detail"])
+        self.assertIn("store store/glm305.bin packed", items["files"]["detail"])
+        (Path(self.root) / "store" / "glm305.json").unlink()
+        (folder / "model-00015-of-00015.safetensors.part").write_bytes(b"")
+        d = by_name(self.check(MGLM))["files"]
+        self.assertFalse(d["ok"])
+        for what in ("still downloading", "store/glm305.bin isn't packed"):
+            self.assertIn(what, d["detail"])
+
+    def test_glms_config_must_agree_with_its_facts(self):
+        for cfg, why in ((glm_config_json(experts=256), "n_routed_experts is 256, the entry's experts_per_layer 288"),
+                         (glm_config_json(dense=1), "config.json has 44 MoE layers, the entry's moe_layers 42"),
+                         (glm_config_json(mtp=0), "config.json has 0 MTP layer(s), the entry's mtp is true"),
+                         (glm_config_json(bits=4.05), "4.05 bits, the entry 3.05 bpw")):
+            self.hub.files[(REV[MGLM], "config.json")] = cfg
+            a = by_name(self.check(MGLM))["architecture"]
+            self.assertFalse(a["ok"])
+            self.assertIn(why, a["detail"])
+        # Qwen's config (no mlp_layer_types or dense layers): every one of its 48 layers is MoE, as the entry says
+        self.assertEqual(curate.moe_layers({"num_hidden_layers": 48, "mtp_num_hidden_layers": 1}), 48)
+        self.assertEqual(curate.mtp_layers({"mtp_num_hidden_layers": 1}), 1)
+        self.assertIsNone(curate.moe_layers({}))
 
     def test_the_engine_must_run_on_this_platform_gpu_and_driver(self):
         e = by_name(self.check(machine=rtx5090(compute_capability="7.0")))["engine"]
@@ -950,7 +1013,8 @@ class CliTests(unittest.TestCase):
     def test_the_listing_and_what_it_refuses(self):
         rc, out = self.cli()
         self.assertEqual(rc, 0)
-        self.assertIn(f"{M305:<34} 3.05   untested", out)
+        self.assertIn(f"{M305:<34} 3.05     untested", out)
+        self.assertIn(f"{MGLM:<34} glm-3.05 untested  -          no (no curation yet)", out)    # not offered yet
         self.assertIn("(no curation yet)", out)
         self.assertEqual(self.cli("9.9")[0], 2)
         rc, out = self.cli("4.05", "--checks", "compat", "--record")
