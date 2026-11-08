@@ -1,19 +1,24 @@
 """Curation (repertory/curate.py): the compatibility checks against fakes for Hugging Face, the hardware and the
 engine's files; the regression check through the benchmark (bench.py's "reference" workload) against a fake engine,
-recording a reference and comparing with it; and the result written into the catalog."""
+recording a reference and comparing with it token by token; the comparison's figures on made-up distributions; and
+the result written into the catalog."""
 import asyncio
 import copy
 import hashlib
 import http.server
 import io
 import json
+import math
 import os
+import random
+import re
 import sys
 import tempfile
 import threading
 import time
 import types
 import unittest
+import zlib
 from pathlib import Path
 from unittest import mock
 
@@ -261,10 +266,22 @@ class HubTests(unittest.TestCase):
 
 
 # ------------------------------------------------------------------------------------------------- the engine
+EOS = 2
+
+
+def tid(word):
+    """The fake engine's tokenizer: a token a word."""
+    return 100 + zlib.crc32(word.encode()) % 50000
+
+
 class FakeEngine(http.server.BaseHTTPRequestHandler):
     """Answers like the engine, deterministically: each reference request gets its own answer (a tool call in two
-    pieces, reasoning before the answer with thinking on), streamed a token at a time with usage at the end."""
+    pieces, reasoning before the answer with thinking on), streamed a token at a time with usage at the end. The same
+    answers as token ids (/prepare, /generate), and a model for teacher forcing that is sure of whatever token comes
+    next."""
     token_s, changed, forgetful = 0.004, None, False       # seconds a token; a case whose answer changed; misses facts
+    shift, template = 0.0, None                            # a damaged model: every logit moved; a new chat template
+    prompts, seen = {}, []                                 # the prompts /prepare gave, by their ids; POSTs as sent
 
     def log_message(self, *a):
         pass
@@ -303,12 +320,54 @@ class FakeEngine(http.server.BaseHTTPRequestHandler):
             text += " Also, it is efficient."
         return None, text, "stop"
 
+    @staticmethod
+    def prompt_ids(req):
+        kw = req.get("chat_template_kwargs") or {}
+        return ([tid(w) for w in req["messages"][-1]["content"].split()] + [11 if kw.get("enable_thinking") else 10]
+                + ([12] if req.get("tools") else []) + ([13] if FakeEngine.template else []))
+
+    def answer_ids(self, req):
+        reasoning, out, _ = self.answer(req)
+        words = (reasoning or "").split() + (["</think>"] if reasoning else [])
+        words += ["<tool_call>", "get_weather", "Lisbon"] if isinstance(out, list) else out.split()
+        return [tid(w) for w in words] + [EOS]
+
+    @staticmethod
+    def dist(token, t):
+        """The model's logprobs at position t where `token` comes next, likeliest first: that token, then 30 others;
+        a damaged model (shift) moves every logit by up to shift."""
+        logits = {token: 6.0, **{60000 + k: 3.0 - 0.2 * k for k in range(30)}}       # tid() never gives these
+        if FakeEngine.shift:
+            logits = {i: v + FakeEngine.shift * math.sin(i * 7.1 + t) for i, v in logits.items()}
+        z = curate.logsumexp(list(logits.values()))
+        return sorted(((v - z, i) for i, v in logits.items()), reverse=True)
+
+    def generate(self, req):
+        ids = req["input_ids"]
+        if not req.get("return_logprob"):                   # the greedy answer to a prompt /prepare gave
+            out = self.answer_ids(FakeEngine.prompts[tuple(ids)])
+            return {"text": "...", "output_ids": out, "meta_info": {"prompt_tokens": len(ids),
+                                                                     "completion_tokens": len(out)}}
+        own, top = [], []
+        for t in range(req["logprob_start_len"], len(ids)):
+            d = self.dist(ids[t], t)
+            own.append([next(lp for lp, i in d if i == ids[t]), ids[t], None])
+            top.append([[lp, i, None] for lp, i in d[:req["top_logprobs_num"]]])
+        return {"text": "", "output_ids": [EOS], "meta_info": {"input_token_logprobs": own, "input_top_logprobs": top}}
+
     def do_POST(self):
         if self.headers.get("X-Repertory-Key") != KEY:
             return self.send_json({}, 403)
         req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        FakeEngine.seen.append((self.path, req))
         if self.path == "/tokenize":
             return self.send_json({"tokens": [0] * (len(req["prompt"]) // 4)})
+        if self.path == "/prepare":
+            ids = self.prompt_ids(req)
+            FakeEngine.prompts[tuple(ids)] = req
+            return self.send_json({"ids": ids})
+        if self.path == "/generate":
+            return self.send_json(self.generate(req))
         reasoning, out, finish = self.answer(req)
         events = [{"choices": [{"delta": {"reasoning_content": w + " "}}]} for w in (reasoning or "").split()]
         if isinstance(out, list):
@@ -419,6 +478,7 @@ class RegressionTests(unittest.TestCase):
 
     def setUp(self):
         FakeEngine.token_s, FakeEngine.changed, FakeEngine.forgetful = 0.004, None, False
+        FakeEngine.shift, FakeEngine.template, FakeEngine.seen = 0.0, None, []
         self.refs = tempfile.mkdtemp(prefix="repertory-refs-")
         self.svc = FakeService(self.server.server_address[1])
         self.specs = []
@@ -428,6 +488,13 @@ class RegressionTests(unittest.TestCase):
         patcher = mock.patch.multiple(curate, DECODE_TOLERANCE=1.0, PREFILL_TOLERANCE=1.0)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # the benchmark finds the reference it replays where curate.py keeps it
+        patcher = mock.patch.object(catalog, "REFERENCE_DIR", Path(self.refs))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def reference(self):
+        return json.loads((Path(self.refs) / f"{M405}.json").read_text(encoding="utf-8"))
 
     def runner(self, specs, workload):
         """The benchmark, as `repertory curate` runs it: it sets the model aside, runs, and brings it back."""
@@ -466,26 +533,102 @@ class RegressionTests(unittest.TestCase):
         self.assertGreater(ref["speed"]["decode_tps"], 0)
         self.assertGreater(ref["speed"]["prefill_tps"], 0)
         self.assertGreater(ref["run"]["ram_gib"], 0)
+        # the token data: every case's but the document's, which keeps the facts its answer must name
+        doc = ref["cases"][3]
+        self.assertEqual((doc["expect"], "tokens" in doc), (["Ilsa Varga", "PERIWINKLE"], False))
+        for c in ref["cases"][:3] + ref["cases"][4:]:
+            t, case = c["tokens"], dict(bench.REFERENCE_CASES)[c["name"]]
+            self.assertEqual(t["prompt"], FakeEngine.prompt_ids(bench.Client(0, "").reference_body(case)))
+            self.assertEqual(t["answer"][-1], EOS)                        # to its natural end, the stop token too
+            self.assertEqual(len(t["logprobs"]), len(t["answer"]))
+            self.assertEqual([len(t[k]) for k in ("top_ids", "top_logprobs")], [len(t["answer"])] * 2)
+            self.assertTrue(all(len(row) == bench.REFERENCE_TOP for row in t["top_ids"] + t["top_logprobs"]))
+            self.assertEqual([row[0] for row in t["top_ids"]], t["answer"])  # the fake is sure of each token
+            self.assertTrue(all(round(x, 3) == x for row in t["top_logprobs"] for x in row))
+        self.assertEqual(ref["cases"][2]["tokens"]["prompt"][-1], 12)        # the tool case's prompt has the tools
+        self.assertEqual(ref["cases"][4]["tokens"]["prompt"][-1], 11)        # and the last has thinking on
+        # compact: a line a position, each list of numbers on one line
+        text = (Path(self.refs) / f"{M405}.json").read_text(encoding="utf-8")
+        rows = sum(len(c["tokens"]["answer"]) for c in ref["cases"] if "tokens" in c)
+        self.assertEqual(len(re.findall(r"^ +\[\d+(, \d+){19}\],?$", text, re.M)), rows)
+        self.assertLess(text.count("\n"), 2 * rows + 200)
         # the next run starts the same configuration, with the reference's RAM cache, and compares
         r = self.regression()
         self.assertEqual(self.specs[-1], [f"4.05:card:262144:ram={ref['run']['ram_gib']}"])
         self.assertTrue(r["ok"], r)
         self.assertEqual(r["numbers"]["identical"], "5/5")
+        self.assertEqual((r["numbers"]["short_top1"], r["numbers"]["short_kl_mean"], r["numbers"]["code_kl_max"]),
+                         (1.0, 0.0, 0.0))
+        self.assertEqual((r["numbers"]["kl_mean_limit"], r["numbers"]["top1_limit"]), (0.002, 0.98))
+        items = by_name(r)
+        self.assertIn("top-1 agreement", items["short"]["detail"])
+        self.assertIn("text identical", items["short"]["detail"])
+        self.assertIn("names Ilsa Varga and PERIWINKLE", items["document"]["detail"])
+        self.assertEqual(r["summary"], "answers within the tolerance (5/5 identical as text), speed within the "
+                                       "tolerance")
         self.assertEqual(self.svc.started, ["full", "full"])                # the model came back after each run
         self.assertEqual(self.svc.host.envs[-1]["RAM_GB"], str(ref["run"]["ram_gib"]))
         self.assertTrue(all(e["QUANT"] == "4.05" and e["MODEL_DIR"] == "./model-4.05" for e in self.svc.host.envs))
+        # the reference's own answers were what this run teacher-forced, not its own
+        forced = [p["input_ids"] for path, p in FakeEngine.seen if path == "/generate" and p.get("return_logprob")]
+        for c in ref["cases"]:
+            if "tokens" in c:
+                self.assertIn(c["tokens"]["prompt"] + c["tokens"]["answer"], forced)
 
-    def test_a_changed_answer_fails_and_says_where(self):
+    def test_new_text_passes_when_its_tokens_replay_and_says_where_it_parted(self):
         self.regression(record=True)
-        FakeEngine.changed = "heat pump moves heat."
+        FakeEngine.changed = "heat pump moves heat."                     # as when a near tie flips the answer
+        r = self.regression()
+        self.assertTrue(r["ok"], r)
+        items = by_name(r)
+        self.assertTrue(items["short"]["ok"])
+        self.assertIn("text not identical (content, completion_tokens differ", items["short"]["detail"])
+        self.assertIn("became", items["short"]["detail"])
+        self.assertIn("which alone doesn't fail", items["short"]["detail"])
+        self.assertEqual(r["numbers"]["identical"], "4/5")
+
+    def test_a_damaged_model_fails(self):
+        self.regression(record=True)
+        FakeEngine.shift = 1.5                                           # every logit moved
         r = self.regression()
         self.assertFalse(r["ok"])
-        items = by_name(r)
-        self.assertFalse(items["short"]["ok"])
-        self.assertIn("content, completion_tokens differ", items["short"]["detail"])
-        self.assertIn("became", items["short"]["detail"])
-        self.assertTrue(items["code"]["ok"] and items["tool"]["ok"])
-        self.assertEqual(r["summary"], "regressed: short")
+        self.assertEqual(r["summary"], "regressed: short, code, tool, reasoning")
+        self.assertGreater(r["numbers"]["short_kl_mean"], 10 * curate.KL_MEAN_MAX)
+        self.assertTrue(by_name(r)["document"]["ok"])                     # its facts are still named
+        self.assertIn("text identical", by_name(r)["short"]["detail"])    # the same text doesn't save it
+
+    def test_a_document_answer_that_misses_its_facts_fails(self):
+        self.regression(record=True)
+        FakeEngine.forgetful = True
+        r = self.regression()
+        self.assertEqual(r["summary"], "regressed: document")
+        self.assertIn("doesn't name Ilsa Varga or PERIWINKLE", by_name(r)["document"]["detail"])
+
+    def test_a_prompt_whose_tokens_changed_fails(self):
+        self.regression(record=True)
+        FakeEngine.template = "v2"
+        r = self.regression()
+        self.assertFalse(by_name(r)["short"]["ok"])
+        self.assertIn("prompt's tokens differ from the reference's", by_name(r)["short"]["detail"])
+        self.assertEqual(r["numbers"]["short_kl_mean"], 0.0)              # the reference's own prompt replays fine
+
+    def test_a_reference_from_before_the_token_comparison_needs_recording_again(self):
+        self.regression(record=True)
+        path = Path(self.refs) / f"{M405}.json"
+        old = self.reference()
+        for c in old["cases"]:
+            c.pop("tokens", None)
+            c.pop("expect", None)
+        path.write_text(json.dumps(old, indent=1), encoding="utf-8")
+        r = self.regression()
+        self.assertIsNone(r["ok"])                                       # untested, not failed
+        self.assertEqual(curate.status_of({"compat": {"ok": True}, "regression": r}), "untested")
+        self.assertIn("predates the token-by-token comparison: record it again with --record", r["summary"])
+        self.assertEqual([(i["name"], i["ok"]) for i in r["items"]], [("reference", None)])
+        self.assertEqual(len(self.specs), 1)                              # and the GPU isn't taken for it
+        # recording replaces it, and the run after compares
+        self.assertTrue(all(i["ok"] for i in self.regression(record=True)["items"]))
+        self.assertTrue(self.regression()["ok"])
 
     def test_slower_decode_fails(self):
         self.regression(record=True)
@@ -504,7 +647,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIsNone(r["ok"])
         self.assertIsNone(by_name(r)["decode"]["ok"])
         self.assertIn("measured on NVIDIA GeForce RTX 5090", by_name(r)["decode"]["detail"])
-        self.assertEqual(r["summary"], "5/5 answers identical; speed not compared")
+        self.assertEqual(r["summary"], "answers within the tolerance (5/5 identical as text); not decided: decode, "
+                                       "prefill")
 
     def test_answers_unfit_to_be_a_reference_are_not_recorded(self):
         FakeEngine.forgetful = True
@@ -539,6 +683,31 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(p["model"], "qwen3.8-flash-next")
         self.assertEqual([p["chat_template_kwargs"]["enable_thinking"] for p in cases],
                          [False, False, False, False, True])
+        # the prompts as token ids: the very requests the chat route ran (not the document's), and greedy answers
+        prepared = [p for path, p in FakeEngine.seen if path == "/prepare"]
+        streamed = [{k: v for k, v in p.items() if k not in ("stream", "stream_options")} for p in cases]
+        self.assertEqual(prepared, streamed[:3] + streamed[4:])
+        greedy = [p for path, p in FakeEngine.seen if path == "/generate" and not p.get("return_logprob")]
+        self.assertEqual([p["sampling_params"] for p in greedy], [{"temperature": 0}] * 4)   # no max_new_tokens
+
+
+def made_up(n=60, seed=0):
+    """A reference answer's token data: n positions, at each its own token the likeliest (about 0.9) and 19 others."""
+    rng = random.Random(seed)                                          # noqa: S311 - made-up data, seeded
+    t = {"prompt": [1, 2, 3], "answer": [], "logprobs": [], "top_ids": [], "top_logprobs": []}
+    for j in range(n):
+        logits = [5.0] + sorted((rng.uniform(-3.0, 2.0) for _ in range(19)), reverse=True)
+        z = curate.logsumexp(logits)
+        t["answer"].append(500 + j)
+        t["top_ids"].append([500 + j] + rng.sample(range(1000, 5000), 19))
+        t["top_logprobs"].append([round(x - z, 3) + 0.0 for x in logits])
+        t["logprobs"].append(t["top_logprobs"][-1][0])
+    return t
+
+
+def replay_of(tokens):
+    """A run that replays the reference exactly."""
+    return copy.deepcopy({k: tokens[k] for k in ("logprobs", "top_ids", "top_logprobs")})
 
 
 class SpeedTests(unittest.TestCase):
@@ -546,14 +715,22 @@ class SpeedTests(unittest.TestCase):
     machine = {"gpu": "G", "vram_gb": 34.2, "ram_gb": 68.4, "platform": "linux"}
 
     def record(self, decode, prefill, gpu="G"):
-        cases = [dict({k: None for k in bench.REFERENCE_ANSWER}, name=n) for n, _ in bench.REFERENCE_CASES]
+        cases = []
+        for n, _ in bench.REFERENCE_CASES:
+            c = dict({k: None for k in bench.REFERENCE_ANSWER}, name=n)
+            if n in bench.REFERENCE_FACTS:
+                c["content"] = "Ilsa Varga serviced it; the code word is PERIWINKLE."
+            else:
+                c["tokens"] = made_up(8)
+                c["replay"] = replay_of(c["tokens"])
+            cases.append(c)
         return {"host": {"gpu": gpu, "ram_total_gb": 68.4, "platform": "linux"}, "card_total_gb": 34.2,
                 "reference": {"cases": cases, "decode_tps": decode, "prefill_tps": prefill}}
 
     def ref(self):
         rec = self.record(60.0, 5000.0)
-        return {"machine": self.machine, "speed": {"decode_tps": 60.0, "prefill_tps": 5000.0},
-                "cases": rec["reference"]["cases"]}
+        cases = [curate.reference_case(c) for c in rec["reference"]["cases"]]
+        return {"machine": self.machine, "speed": {"decode_tps": 60.0, "prefill_tps": 5000.0}, "cases": cases}
 
     def test_within_the_tolerance(self):
         items, numbers = curate.compare(self.ref(), self.record(51.6, 4510.0))     # 14% and 9.8% slower
@@ -570,6 +747,78 @@ class SpeedTests(unittest.TestCase):
 
     def test_the_tolerances(self):
         self.assertEqual((curate.DECODE_TOLERANCE, curate.PREFILL_TOLERANCE), (0.15, 0.10))
+        self.assertEqual((curate.KL_MEAN_MAX, curate.TOP1_MIN, curate.MISSING_MARGIN), (0.002, 0.98, 1.0))
+
+
+class ReplayTests(unittest.TestCase):
+    """The token comparison's figures on made-up distributions: what last-bit noise and a near tie do to them, and
+    what a damaged model does."""
+
+    def test_the_same_distributions(self):
+        t = made_up()
+        m = curate.replay_metrics(t, replay_of(t))
+        self.assertEqual((m["positions"], m["agreed"], m["top1"]), (60, 60, 1.0))
+        self.assertEqual((m["kl_mean"], m["kl_max"], m["logprob_delta_mean"], m["logprob_delta_max"]),
+                         (0.0, 0.0, 0.0, 0.0))
+        self.assertTrue(curate.replay_passes(m))
+
+    def test_last_bit_noise_and_a_flipped_near_tie_pass(self):
+        t = made_up()
+        a, b = t["top_ids"][10][:2]
+        t["top_logprobs"][10][:2] = [-0.700, -0.701]                   # two tokens nearly tied in the reference
+        t["logprobs"][10] = -0.700
+        run = replay_of(t)
+        rng = random.Random(1)                                         # noqa: S311 - made-up noise, seeded
+        for row in run["top_logprobs"]:                                # every logprob a little off
+            row[:] = [round(x + rng.uniform(-0.002, 0.002), 3) for x in row]
+        run["top_ids"][10][:2] = [b, a]                                # and the tie goes the other way
+        run["top_logprobs"][10][:2] = [-0.700, -0.702]
+        run["logprobs"] = [row[0] for row in run["top_logprobs"]]
+        run["logprobs"][10] = -0.702                                   # the reference's token, now second
+        m = curate.replay_metrics(t, run)
+        self.assertEqual(m["agreed"], 59)
+        self.assertGreaterEqual(m["top1"], curate.TOP1_MIN)
+        self.assertLess(m["kl_mean"], 1e-4)
+        self.assertGreater(m["kl_max"], 0.0)
+        self.assertAlmostEqual(m["logprob_delta_max"], 0.002, places=6)
+        self.assertTrue(curate.replay_passes(m))
+
+    def test_a_damaged_model_fails(self):
+        t = made_up()
+        flat = replay_of(t)                                            # every distribution flatter
+        for row in flat["top_logprobs"]:
+            z = curate.logsumexp([x / 2 for x in row])
+            row[:] = [round(x / 2 - z, 3) for x in row]
+        flat["logprobs"] = [row[0] for row in flat["top_logprobs"]]
+        m = curate.replay_metrics(t, flat)
+        self.assertEqual(m["top1"], 1.0)                               # the likeliest tokens stay...
+        self.assertGreater(m["kl_mean"], 10 * curate.KL_MEAN_MAX)      # ...the distributions don't
+        self.assertFalse(curate.replay_passes(m))
+        wrong = replay_of(t)                                           # another token wins one position in ten
+        for j in range(0, 60, 10):
+            wrong["top_ids"][j][:2] = wrong["top_ids"][j][1::-1]
+        m = curate.replay_metrics(t, wrong)
+        self.assertEqual(m["agreed"], 54)
+        self.assertFalse(curate.replay_passes(m))
+
+    def test_a_token_missing_from_one_list(self):
+        p, q = [math.log(0.9), math.log(0.1)], [math.log(0.8), math.log(0.2)]
+        got = curate.position_kl([1, 2], p, [1, 3], q)
+        # token 3 isn't in the reference's list, token 2 isn't in the run's: each at its list's smallest, less 1 nat
+        ref = {1: 0.9, 2: 0.1, 3: 0.1 / math.e}
+        run = {1: 0.8, 2: 0.2 / math.e, 3: 0.2}
+        zr, zq = sum(ref.values()), sum(run.values())
+        want = sum(ref[t] / zr * math.log((ref[t] / zr) / (run[t] / zq)) for t in ref)
+        self.assertAlmostEqual(got, want, places=12)
+        self.assertEqual(curate.position_kl([1, 2], p, [1, 2], p), 0.0)
+
+    def test_a_replay_missing_from_the_run_is_undecided(self):
+        t = made_up(8)
+        ok, detail = curate.replay_case({"name": "short", "tokens": t}, {"tokens": t}, {})
+        self.assertIsNone(ok)
+        self.assertIn("wasn't replayed", detail)
+        short = dict(replay_of(t), top_ids=replay_of(t)["top_ids"][:-1])
+        self.assertIsNone(curate.replay_case({"name": "short", "tokens": t}, {"replay": short}, {})[0])
 
 
 # ------------------------------------------------------------------------------------------------- the result

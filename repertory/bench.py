@@ -27,7 +27,8 @@ prefix cache.
             test: three locker combinations at 15%, 50% and 85% of a log of up to 100K tokens    ~3-6 min a run
   reference curation's regression requests (repertory/curate.py): after the warm-up, a short answer, code, a tool
             call, a 73K-token document with one fact to find, and a short answer with thinking on, each answer
-            recorded whole (text, reasoning, tool calls, finish reason, token counts)            ~2 min a run
+            recorded whole (text, reasoning, tool calls, finish reason, token counts); then each short answer
+            again as token ids with its logprobs, and the model's reference answers replayed     ~2 min a run
 Documents that don't fit the run's context are skipped; the retrieval document is sized to it. Runs before Repertory
 used the prompts and documents of the benchmark.py in MaxDevv/lean-qwenflash, which this project began as a fork of;
 results don't compare 1:1 with those (or with his), and runs are only compared with runs of the same protocol.
@@ -141,6 +142,30 @@ REFERENCE_CASES = (
 )
 # what an answer is, for the comparison: everything but its timing
 REFERENCE_ANSWER = ("content", "reasoning", "tool_calls", "finish", "prompt_tokens", "completion_tokens")
+# The cases checked by what the answer must name, not token by token: teacher-forcing the 73K-token document is one
+# forward pass over all of it, with logits for every position, far more memory than a run has spare.
+REFERENCE_FACTS = {"document": ("Ilsa Varga", "PERIWINKLE")}
+# The other cases' answers are also recorded as token ids, with the logprobs teacher forcing gives each position: the
+# answer's own token's and the REFERENCE_TOP likeliest tokens', rounded to LOGPROB_DIGITS (natural log).
+REFERENCE_TOP = 20
+LOGPROB_DIGITS = 3
+
+
+def missing_facts(facts, text):
+    """The facts an answer doesn't name (case aside)."""
+    return [f for f in facts if f.lower() not in (text or "").lower()]
+
+
+def reference_tokens(model_id):
+    """The token data of the model's regression reference (catalog/reference/MODEL.json, which curate.py records),
+    by case: what a run replays. Empty when there is no reference, or it has none."""
+    try:
+        ref = json.loads(catalog.reference_path(model_id).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(ref, dict) or ref.get("protocol") != REFERENCE_PROTOCOL:
+        return {}
+    return {c["name"]: c["tokens"] for c in ref.get("cases") or [] if (c.get("tokens") or {}).get("answer")}
 
 
 # ---------------------------------------------------------------------------------------------------------------- runs
@@ -279,12 +304,17 @@ class Client:
                 "decode_tps": round((n - 1) / (last - first), 2) if first and last and last > first and n > 1 else None,
                 "wall_s": round(time.perf_counter() - t0, 1), "answer": "".join(text)}
 
-    def reference(self, name, body):
-        """One of curation's requests (REFERENCE_CASES): greedy, streamed to its natural end (no max_tokens), thinking
-        off unless the case turns it on. The whole answer (text, reasoning, tool calls merged from their pieces,
-        finish reason, token counts) and its timing."""
-        body = dict(body, model=self.model, temperature=0, stream=True, stream_options={"include_usage": True})
+    def reference_body(self, body):
+        """One of curation's requests (REFERENCE_CASES) as it is sent: greedy, thinking off unless the case turns it
+        on, never max_tokens."""
+        body = dict(body, model=self.model, temperature=0)
         body.setdefault("chat_template_kwargs", {"enable_thinking": False})
+        return body
+
+    def reference(self, name, body):
+        """One of curation's requests, streamed to its natural end. The whole answer (text, reasoning, tool calls
+        merged from their pieces, finish reason, token counts) and its timing."""
+        body = dict(self.reference_body(body), stream=True, stream_options={"include_usage": True})
         t0 = time.perf_counter()
         first = last = usage = finish = None
         content, reasoning, calls = [], [], {}
@@ -313,6 +343,38 @@ class Client:
                 "prefill_tps": round(p / max(ttft, 1e-6), 1) if ttft is not None and p else None,
                 "decode_tps": round((n - 1) / decode_s, 2) if decode_s and n > 1 else None,
                 "decode_s": round(decode_s, 4) if decode_s else None, "total_s": round(time.perf_counter() - t0, 3)}
+
+    def prompt_ids(self, body):
+        """A curation request's prompt as token ids, as the engine's chat routes build it (POST /prepare)."""
+        try:
+            return self.post("/prepare", self.reference_body(body))["ids"]
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise RuntimeError("the engine has no /prepare: it predates the replay check") from e
+            raise
+
+    def greedy_ids(self, ids):
+        """The greedy answer to a prompt's token ids, to its natural end, as token ids (the stop token included)."""
+        out = self.post("/generate", {"input_ids": ids, "sampling_params": {"temperature": 0}}, timeout=1800)
+        if "output_ids" not in out:
+            raise RuntimeError("the engine's /generate doesn't return output_ids: it predates the replay check")
+        return out["output_ids"]
+
+    def logprobs(self, prompt, answer):
+        """Teacher forcing: the answer's tokens fed after the prompt's in one forward pass (POST /generate with
+        return_logprob). At each of the answer's positions, the logprob of its token there and the REFERENCE_TOP
+        likeliest tokens with theirs, likeliest first."""
+        m = self.post("/generate", {"input_ids": prompt + answer, "return_logprob": True,
+                                    "logprob_start_len": len(prompt), "top_logprobs_num": REFERENCE_TOP},
+                      timeout=600)["meta_info"]
+        own, top = m.get("input_token_logprobs") or [], m.get("input_top_logprobs") or []
+        if len(own) != len(answer) or len(top) != len(answer):
+            raise RuntimeError(f"teacher forcing gave {len(top)} positions for an answer of {len(answer)} tokens")
+
+        def r(x):
+            return round(x, LOGPROB_DIGITS) + 0.0           # + 0.0: no -0.0
+        return {"logprobs": [r(e[0]) for e in own], "top_ids": [[e[1] for e in row] for row in top],
+                "top_logprobs": [[r(e[0]) for e in row] for row in top]}
 
     def engine_stats(self):
         """Where the expert picks came from, and the cache's size."""
@@ -822,7 +884,7 @@ class Bench:
         path = self.dir / f"{r['label']}.json"
 
         def save():
-            path.write_text(json.dumps(rec, indent=1))
+            path.write_text(catalog.flat_numbers(json.dumps(rec, indent=1)))      # token data: a line a position
         have = (svc.setup.hw or {}).get("engine") or {}
         model = catalog.load().model(r["quant"])
         if have.get("driver") and have.get(catalog.setup_id(model)) != "1":
@@ -959,7 +1021,7 @@ class Bench:
     async def reference_steps(self, client, rec, save):
         """Curation's regression requests (REFERENCE_CASES) after the warm-up, each answer recorded whole; curate.py
         compares them with the model's reference. The figures the tables show come along: decode over the answers,
-        prefill and the fact found in the long document."""
+        prefill and the fact found in the long document. Then, untimed, the token data (replay_steps)."""
         def check():
             if self.cancelled or self.yielded:
                 raise RuntimeError(self.why_stopped("stopped"))
@@ -986,10 +1048,35 @@ class Bench:
         rec["short_ttft_median_s"] = cases[0]["ttft_s"]
         doc = next(c for c in cases if c["name"] == "document")
         rec["long"] = {"prompt_tokens": doc["prompt_tokens"], "prefill_tps": doc["prefill_tps"],
-                       "needle_found": "PERIWINKLE" in doc["content"]}
+                       "needle_found": not missing_facts(REFERENCE_FACTS["document"], doc["content"])}
         self.emit(f"  reference: decode {fmt(speed['decode_tps'])} tok/s over the answers, the "
                   f"{doc['prompt_tokens']:,}-token document read at {fmt(speed['prefill_tps'], '{:,.0f}')} tok/s")
         save()
+        await self.replay_steps(client, rec, cases, check, save)
+
+    async def replay_steps(self, client, rec, cases, check, save):
+        """Each answer but the document's (REFERENCE_FACTS) as token ids, for curate.py: the prompt's ids as the chat
+        route built them (/prepare), the greedy answer to them (/generate) and its logprobs, teacher-forced
+        ("tokens", what a new reference records); and when the model's reference has them, its own answer's tokens
+        teacher-forced on this run ("replay", what the comparison reads)."""
+        model = catalog.load().model(rec["quant"])
+        old = reference_tokens(model["id"]) if model else {}
+        positions = replayed = 0
+        for (name, body), case in zip(REFERENCE_CASES, cases, strict=True):
+            if name in REFERENCE_FACTS:
+                continue
+            check()
+            prompt = await asyncio.to_thread(client.prompt_ids, body)
+            answer = await asyncio.to_thread(client.greedy_ids, prompt)
+            case["tokens"] = {"prompt": prompt, "answer": answer,
+                              **await asyncio.to_thread(client.logprobs, prompt, answer)}
+            positions += len(answer)
+            if name in old:
+                case["replay"] = await asyncio.to_thread(client.logprobs, old[name]["prompt"], old[name]["answer"])
+                replayed += 1
+            save()
+        self.emit(f"  tokens: {positions:,} answer positions teacher-forced"
+                  + (f"; the reference's {replayed} answers replayed" if replayed else "; no reference to replay"))
 
     def resize_kit(self, client, r, wl):
         """What the resize workloads share: answers, the per-size check, the manager's own switch requests, and the

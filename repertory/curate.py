@@ -15,11 +15,14 @@ regression  Takes the GPU, through the benchmark (repertory/bench.py, workload "
             aside, this one starts on the whole card at its full context, the run steps aside for games, and the
             model comes back afterwards. The fixed requests (bench.REFERENCE_CASES: a short answer, code, a tool call,
             a 73K-token document with one fact to find, and one with thinking on; greedy, each answer to its natural
-            end) must give the reference's answers exactly: text, reasoning, tool calls, finish reasons and token
-            counts. Decode and prefill may be at most DECODE_TOLERANCE and PREFILL_TOLERANCE slower than the
-            reference's, which is only compared on the machine it was measured on (elsewhere the check can't pass).
+            end) are compared with the reference token by token: its answers, as token ids, are teacher-forced on
+            this run, and each position's distribution must stay close to the reference's (KL_MEAN_MAX, TOP1_MIN).
+            The document's answer must name its facts. Whether the text is identical is reported, not judged. Decode
+            and prefill may be at most DECODE_TOLERANCE and PREFILL_TOLERANCE slower than the reference's, which is
+            only compared on the machine it was measured on (elsewhere the check can't pass).
             --record writes a new reference from the run (catalog/reference/MODEL.json) when there is none, or to
-            accept a change; the next run compares against it.
+            accept a change; the next run compares against it. A reference from before the token comparison has no
+            token data: until it is recorded again, the check is undecided.
 
 The result goes into the entry's `curation` in catalog/catalog.json: curated when both checks passed, failed when one
 failed, untested otherwise (one not run yet, or a reference just recorded). With it: the date, the machine (GPU and
@@ -27,6 +30,7 @@ VRAM, RAM, platform; no host names), the engine commit, and each check's items a
 keeps its earlier result.
 """
 import json
+import math
 import os
 import subprocess
 import time
@@ -50,6 +54,26 @@ DECODE_TOLERANCE = 0.15
 # Prefill: the 73K-token document's first token came within 2.5% across four runs (12.39-12.70 s,
 # research/engine-parity), and 32-64K documents within 0.3-6.7% between trials; 10%.
 PREFILL_TOLERANCE = 0.10
+# The answers are compared token by token, not as text. The engine's MoE path can add the experts' outputs in an order
+# that follows where they sit (VRAM or RAM), so the last bits differ from one run to the next, and where two tokens are
+# nearly tied a greedy answer can flip and go its own way from there: on the 3.05 bpw quant, two fresh runs minutes
+# apart gave different text in three of the five cases. So each short case's reference answer, as token ids, is
+# teacher-forced on the run (bench.Bench.replay_steps), and each position's distribution (its bench.REFERENCE_TOP
+# likeliest tokens) is compared with the reference's:
+# - KL(reference || run), over the tokens either list holds, both renormalised over them. A token missing from one list
+#   takes that list's smallest logprob less MISSING_MARGIN: it is less likely than every token listed, by an amount the
+#   list doesn't tell; a nat below keeps it in the tail, where it moves the KL little either way;
+# - top-1 agreement: the share of positions where the run's likeliest token is the reference's (the answer's own token,
+#   unless that was a near tie between the reference's decode and its teacher-forced pass);
+# - how far the logprob of the answer's own token moved (reported only).
+# A case passes with a mean KL of at most KL_MEAN_MAX and an agreement of at least TOP1_MIN. Starting values, not yet
+# measured: a different summation order changes logits in their last bits, which should keep the KL far below 0.002
+# nats a token, while a real regression (a wrong expert, a broken kernel, damaged weights) shifts whole distributions;
+# 98% lets one position in fifty flip at a near tie (one flip in the 28-token tool call is already 96%). To be
+# calibrated on the GPU, from fresh runs of both quants against their references.
+KL_MEAN_MAX = 0.002
+TOP1_MIN = 0.98
+MISSING_MARGIN = 1.0
 HUB = "https://huggingface.co"
 PLATFORMS = {"linux": "linux-x86_64", "windows-wsl": "windows-wsl2"}     # host kinds as the catalog names them
 CHECKS = ("compat", "regression")
@@ -387,8 +411,34 @@ def load_reference(model_id, folder=None):
 def save_reference(ref, folder=None):
     p = (Path(folder) / f"{ref['model']}.json") if folder else catalog.reference_path(ref["model"])
     p.parent.mkdir(parents=True, exist_ok=True)
-    catalog.write_json(p, ref, indent=1)
+    catalog.write_json(p, ref, indent=1, flat=True)            # the token data a line a position
     return p
+
+
+def reference_case(c):
+    """A run's case as a reference keeps it: the answer and its timing, then what the comparison needs: the facts the
+    document's answer must name, or the other answers' token data."""
+    out = {k: c.get(k) for k in ("name",) + bench.REFERENCE_ANSWER + ("ttft_s", "decode_tps", "prefill_tps")}
+    if c["name"] in bench.REFERENCE_FACTS:
+        out["expect"] = list(bench.REFERENCE_FACTS[c["name"]])
+    elif c.get("tokens"):
+        out["tokens"] = c["tokens"]
+    return out
+
+
+def replayable(ref):
+    """Whether a reference has what the token comparison replays: token data for every case not checked by facts.
+    References from before it have none."""
+    cases = [c for c in ref.get("cases") or [] if "expect" not in c and c.get("name") not in bench.REFERENCE_FACTS]
+    return bool(cases) and all(complete_tokens(c.get("tokens")) for c in cases)
+
+
+def complete_tokens(t):
+    """A case's token data is whole: the prompt's ids, and the answer's with logprobs for each of its positions."""
+    t = t or {}
+    n = len(t.get("answer") or ())
+    return bool(n and t.get("prompt")) and all(len(t.get(k) or ()) == n
+                                               for k in ("logprobs", "top_ids", "top_logprobs"))
 
 
 def run_machine(rec):
@@ -413,7 +463,8 @@ def reference_spec(model, ref):
 
 def sanity(cases):
     """What a reference must show before it is recorded: every answer ended by itself, the tool call is the weather
-    lookup for Lisbon, the document's fact was found, and thinking was on in the last case."""
+    lookup for Lisbon, the document's facts were found, thinking was on in the last case, and the other answers came
+    with their token data."""
     by = {c["name"]: c for c in cases}
     items = []
     capped = [c["name"] for c in cases if c.get("finish") not in ("stop", "tool_calls")]
@@ -423,9 +474,15 @@ def sanity(cases):
     ok = bool(calls) and calls[0].get("name") == "get_weather" and "lisbon" in str(calls[0].get("arguments")).lower()
     items.append(item("tool call", ok, f"{calls[0]['name']}({calls[0]['arguments']})" if calls else "no tool call"))
     doc = (by.get("document") or {}).get("content", "")
-    items.append(item("document", "PERIWINKLE" in doc and "Varga" in doc, doc.strip()[:160] or "no answer"))
+    items.append(item("document", not bench.missing_facts(bench.REFERENCE_FACTS["document"], doc),
+                      doc.strip()[:160] or "no answer"))
     items.append(item("thinking", bool((by.get("reasoning") or {}).get("reasoning")),
                       "reasoned before answering" if (by.get("reasoning") or {}).get("reasoning") else "no reasoning"))
+    short = [c for c in cases if c["name"] not in bench.REFERENCE_FACTS]
+    bare = [c["name"] for c in short if not complete_tokens(c.get("tokens"))]
+    n = sum(len(c["tokens"]["answer"]) for c in short if c["name"] not in bare)
+    items.append(item("tokens", bool(short) and not bare,
+                      f"{n:,} answer tokens with their logprobs" if not bare else f"no token data: {', '.join(bare)}"))
     return items
 
 
@@ -437,10 +494,74 @@ def first_difference(a, b):
     return f"{json.dumps(a)[:80]} became {json.dumps(b)[:80]}"
 
 
+def logsumexp(xs):
+    top = max(xs)
+    return top + math.log(sum(math.exp(x - top) for x in xs))
+
+
+def position_kl(ref_ids, ref_lps, run_ids, run_lps):
+    """KL(reference || run) at one position, from the two top lists: over the tokens either holds, a token missing from
+    one at that list's smallest logprob less MISSING_MARGIN, both renormalised."""
+    ref, run = dict(zip(ref_ids, ref_lps, strict=True)), dict(zip(run_ids, run_lps, strict=True))
+    floor_ref, floor_run = min(ref_lps) - MISSING_MARGIN, min(run_lps) - MISSING_MARGIN
+    union = list(ref.keys() | run.keys())
+    p, q = [ref.get(t, floor_ref) for t in union], [run.get(t, floor_run) for t in union]
+    zp, zq = logsumexp(p), logsumexp(q)
+    return max(0.0, sum(math.exp(a - zp) * ((a - zp) - (b - zq)) for a, b in zip(p, q, strict=True)))
+
+
+def replay_metrics(tokens, replay):
+    """A reference answer replayed on a run (its "replay": logprobs, top_ids, top_logprobs a position) against the
+    reference's own ("tokens"): the positions, how many agree on the likeliest token and the share, KL(reference ||
+    run) mean and max, and how far the answer token's logprob moved, mean and max."""
+    n = len(tokens["answer"])
+    kl = [position_kl(tokens["top_ids"][j], tokens["top_logprobs"][j], replay["top_ids"][j],
+                      replay["top_logprobs"][j]) for j in range(n)]
+    agreed = sum(replay["top_ids"][j][0] == tokens["top_ids"][j][0] for j in range(n))
+    moved = [abs(a - b) for a, b in zip(replay["logprobs"], tokens["logprobs"], strict=True)]
+    return {"positions": n, "agreed": agreed, "top1": agreed / n, "kl_mean": sum(kl) / n, "kl_max": max(kl),
+            "logprob_delta_mean": sum(moved) / n, "logprob_delta_max": max(moved)}
+
+
+def replay_passes(m):
+    return m["kl_mean"] <= KL_MEAN_MAX and m["top1"] >= TOP1_MIN
+
+
+def replay_case(ref_case, case, numbers):
+    """A short case: the reference's answer as this run teacher-forced it, against the reference's: (ok, detail). Its
+    figures go into numbers as CASE_top1, CASE_kl_mean and so on. A prompt whose tokens changed fails (a new chat
+    template or tokenizer): what the model sees is no longer the reference's."""
+    name, tokens, replay = ref_case["name"], ref_case["tokens"], case.get("replay") or {}
+    if not complete_tokens(dict(replay, prompt=tokens["prompt"], answer=tokens["answer"])):
+        return None, "the reference's answer wasn't replayed in this run"
+    m = replay_metrics(tokens, replay)
+    numbers.update({f"{name}_top1": round(m["top1"], 4),
+                    **{f"{name}_{k}": float(f"{m[k]:.3g}") for k in ("kl_mean", "kl_max", "logprob_delta_mean",
+                                                                     "logprob_delta_max")}})
+    ok = replay_passes(m)
+    detail = (f"top-1 agreement {m['agreed']}/{m['positions']} ({m['top1']:.1%}, at least {TOP1_MIN:.0%}), KL mean "
+              f"{m['kl_mean']:.2g} (at most {KL_MEAN_MAX:g}), max {m['kl_max']:.2g}; the answer token's logprob moved "
+              f"{m['logprob_delta_mean']:.2g} on average, at most {m['logprob_delta_max']:.2g}")
+    prompt = (case.get("tokens") or {}).get("prompt")
+    if prompt is not None and prompt != tokens["prompt"]:
+        ok, detail = False, f"its prompt's tokens differ from the reference's (chat template or tokenizer); {detail}"
+    return ok, detail
+
+
+def facts_case(facts, case):
+    """A case checked by what its answer must name: (ok, detail)."""
+    missing = bench.missing_facts(facts, case.get("content"))
+    if missing:
+        return False, f"doesn't name {' or '.join(missing)}: {(case.get('content') or '').strip()[:120]!r}"
+    return True, f"names {' and '.join(facts)}"
+
+
 def compare(ref, rec):
-    """A run's answers and speeds against the reference: (items, numbers)."""
+    """A run's answers and speeds against the reference: (items, numbers). An answer passes by its tokens (or, for
+    the document, its facts); whether its text is identical is said, not judged."""
     now = {c["name"]: c for c in (rec.get("reference") or {}).get("cases") or []}
     items, same = [], 0
+    numbers = {"kl_mean_limit": KL_MEAN_MAX, "top1_limit": TOP1_MIN}
     for c in ref["cases"]:
         n = now.get(c["name"])
         if n is None:
@@ -448,11 +569,14 @@ def compare(ref, rec):
             continue
         diffs = [k for k in bench.REFERENCE_ANSWER if n.get(k) != c.get(k)]
         same += not diffs
-        where = first_difference(c.get(diffs[0]), n.get(diffs[0])) if diffs else ""
-        items.append(item(c["name"], not diffs, f"{', '.join(diffs)} differ; {diffs[0]} {where}" if diffs
-                          else "identical"))
-    numbers = {"identical": f"{same}/{len(ref['cases'])}", "decode_tolerance_pct": round(100 * DECODE_TOLERANCE),
-               "prefill_tolerance_pct": round(100 * PREFILL_TOLERANCE)}
+        text = (f"text not identical ({', '.join(diffs)} differ; {diffs[0]} "
+                f"{first_difference(c.get(diffs[0]), n.get(diffs[0]))}), which alone doesn't fail" if diffs
+                else "text identical")
+        facts = c.get("expect") or bench.REFERENCE_FACTS.get(c["name"])
+        ok, detail = facts_case(facts, n) if facts else replay_case(c, n, numbers)
+        items.append(item(c["name"], ok, f"{detail}; {text}"))
+    numbers.update({"identical": f"{same}/{len(ref['cases'])}", "decode_tolerance_pct": round(100 * DECODE_TOLERANCE),
+                    "prefill_tolerance_pct": round(100 * PREFILL_TOLERANCE)})
     here, there = run_machine(rec), ref.get("machine") or {}
     for key, tol, name in (("decode_tps", DECODE_TOLERANCE, "decode"), ("prefill_tps", PREFILL_TOLERANCE, "prefill")):
         base, got = (ref.get("speed") or {}).get(key), (rec.get("reference") or {}).get(key)
@@ -485,6 +609,11 @@ def regression(model, runner, record=False, folder=None):
                            f"{bench.REFERENCE_PROTOCOL}: record it again",
                    items=[item("reference", None, "recorded with other requests")])
         return out
+    if ref is not None and not replayable(ref):           # the GPU isn't taken for a run that can't decide
+        out.update(summary="the reference predates the token-by-token comparison: record it again with --record, "
+                           "then run this again to compare",
+                   items=[item("reference", None, f"{ref.get('date')}'s reference has no token data to replay")])
+        return out
     # a new reference keeps the configuration of the one it replaces, so speeds stay comparable over time
     records = runner([reference_spec(model, existing)], "reference")
     rec = (records or [None])[0]
@@ -511,9 +640,7 @@ def regression(model, runner, record=False, folder=None):
                "machine": run_machine(rec), "engine_commit": rec.get("engine_commit"), "run": run,
                "stack": rec.get("stack"),
                "speed": {k: rec["reference"].get(k) for k in ("decode_tps", "prefill_tps")},
-               "cases": [{k: c.get(k) for k in ("name",) + bench.REFERENCE_ANSWER + ("ttft_s", "decode_tps",
-                                                                                      "prefill_tps")}
-                         for c in rec["reference"]["cases"]]}
+               "cases": [reference_case(c) for c in rec["reference"]["cases"]]}
         path = save_reference(ref, folder)
         out["summary"] = (f"reference recorded in {path.name}: decode {ref['speed']['decode_tps']} tok/s, prefill "
                           f"{ref['speed']['prefill_tps']} tok/s; run the check again to compare against it")
@@ -526,12 +653,16 @@ def regression(model, runner, record=False, folder=None):
     numbers["vram_experts_ref"] = (ref.get("run") or {}).get("vram_experts")
     out.update(items=items, numbers=numbers, ok=outcome(items))
     bad = [i["name"] for i in items if i["ok"] is False]
+    open_ = [i["name"] for i in items if i["ok"] is None]
+    answers = f"answers within the tolerance ({numbers['identical']} identical as text)"
     if out["ok"]:
-        out["summary"] = "identical answers, speed within the tolerance"
+        out["summary"] = f"{answers}, speed within the tolerance"
     elif bad:
         out["summary"] = f"regressed: {', '.join(bad)}"
+    elif {c["name"] for c in ref["cases"]}.isdisjoint(open_):
+        out["summary"] = f"{answers}; not decided: {', '.join(open_)}"
     else:
-        out["summary"] = f"{numbers['identical']} answers identical; speed not compared"
+        out["summary"] = f"not decided: {', '.join(open_)}"
     return out
 
 
