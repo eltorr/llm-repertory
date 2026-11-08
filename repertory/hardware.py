@@ -328,6 +328,8 @@ def recommend(hw, cfg):
     out[-1]["apply_label"] = "Apply baseline"
     ctx_any = sizing.max_context(quant, budget, staging=False)
     ctx_fast = sizing.max_context(quant, budget)
+    # 3.05 is the smaller of Qwen's two quants: named here as in the preset rule (sizing.baseline), until another
+    # family needs its own
     if sizing.max_context("3.05", budget, staging=False) == 0:
         pass                                    # the baseline item says why
     elif ctx_any == 0:
