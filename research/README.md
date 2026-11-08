@@ -8,6 +8,7 @@ Repertory's benchmark has prompts and documents of its own, so new runs don't co
 
 | Date | Machine | Stack | What it measured | Record |
 |---|---|---|---|---|
+| 2026-11-08 | RTX 5090, 64 GB RAM, WSL2 | PyTorch 2.15, CUDA 13.2 | Qwen3.8-Flash-Next 4.05 against GLM-5.3-Flash 3.05 and 2.05 on seven hard tasks: 6/7, 5/7, 5/7. Each solved two of the three coding tasks; GLM did them in 11-12 minutes, Qwen (at xhigh) in 45 | [head-to-head](head-to-head/REPORT.md) |
 | 2026-11-07 | RTX 5090, 64 GB RAM, WSL2 | PyTorch 2.15, CUDA 13.2 | The engine features that are off (prefetch, MTP drafting, the CPU lane): all slower overall on this PC. Where a token's time goes: GPU compute ~50%, RAM-to-VRAM expert copies ~20-25% at 23.5 GB/s where the link does 52-55 GB/s, Python ~5% | [feature-ab](feature-ab/REPORT.md) |
 | 2026-11-07 | RTX 5090, 64 GB RAM, WSL2 | PyTorch 2.15, CUDA 13.2 | Repertory's engine against the earlier fork's: five greedy requests (short, code, tool call, 73K-token document, thinking) give identical answers | [engine-parity](engine-parity/REPORT.md) |
 | 2026-11-07 | RTX 5090, 64 GB RAM, WSL2 | PyTorch 2.15, CUDA 13.2 | Switching full <-> lean without a restart: 0.2-0.5 s, 13.3 GB freed, same answers. The RAM cache too: under a second to shrink it, grown back in the background without holding requests (stress-tested) | [live-resize](live-resize/REPORT.md) |

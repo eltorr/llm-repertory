@@ -8,6 +8,7 @@
   python -m repertory plan [--budget-gb N]                     VRAM/RAM plan for this GPU (sizing.py)
   python -m repertory bench [RUNS] [--workload quick]          benchmark this machine (takes the GPU while it runs)
   python -m repertory curate [MODEL] [--checks ...] [--record]  check a catalog entry before it's offered
+  python -m repertory results add PATH... | page                log results; write the benchmark page
 """
 import argparse
 import asyncio
@@ -390,6 +391,11 @@ def bench_records(cfg, runs, workload):
     return bench_in_process(cfg, runs, workload)
 
 
+def cmd_results(cfg, a):
+    from . import results
+    return results.main(a)
+
+
 def cmd_curate(cfg, a):
     from . import curate
     return curate.main(cfg, a, bench_records)
@@ -450,6 +456,11 @@ def main(argv=None):
                    help="record a new regression reference from this run (none yet, or to accept a change)")
     c.add_argument("--no-write", action="store_true", help="print the result without writing it into the catalog")
     c.add_argument("--json", action="store_true")
+    r = sub.add_parser("results", help="the results log and the benchmark page (docs/benchmarks.md)")
+    rs = r.add_subparsers(dest="results_cmd", required=True)
+    ra = rs.add_parser("add", help="log benchmark runs (a run's JSON, or a bench folder) and head-to-head results")
+    ra.add_argument("paths", nargs="+")
+    rs.add_parser("page", help="write docs/benchmarks.md from the log")
     a = ap.parse_args(argv)
     cfg = config.load_config()
     if not config.CONFIG_PATH.exists():
@@ -457,7 +468,8 @@ def main(argv=None):
         config.save_config(cfg)
     config.ensure_token(cfg)
     handler = {None: cmd_serve, "serve": cmd_serve, "open": cmd_open, "status": cmd_status, "detect": cmd_detect,
-               "setup": cmd_setup, "plan": cmd_plan, "bench": cmd_bench, "curate": cmd_curate}[a.cmd]
+               "setup": cmd_setup, "plan": cmd_plan, "bench": cmd_bench, "curate": cmd_curate,
+               "results": cmd_results}[a.cmd]
     return handler(cfg, a)
 
 

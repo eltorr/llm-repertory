@@ -8,8 +8,8 @@ scales itself back or pauses, and when the game closes, the model takes the reso
 
 Today it serves Qwen3.8-Flash-Next, a 125B mixture-of-experts model, at up to 256K context on cards from 8 to 48 GB.
 The experts that don't fit in VRAM are kept in RAM and on the SSD. Clients use an OpenAI-compatible API at
-`http://127.0.0.1:30000/v1`. GLM-5.3-Flash (320B, 125 GB at 3.05 bpw) is in the catalog too, and is offered once it
-passes curation ([engines and models](docs/engines.md)).
+`http://127.0.0.1:30000/v1`. GLM-5.3-Flash (320B: 125 GB at 3.05 bpw, 85 GB at 2.05) is in the catalog too; a quant
+is offered once it passes curation ([engines and models](docs/engines.md)).
 
 ![The dashboard: model state, requests, pressure from other apps, memory](docs/media/dashboard.png)
 
@@ -138,7 +138,8 @@ the preset is and whether it was measured. The figures are for Linux; Windows ke
 
 The fastest measured setup per card size and quant, on an RTX 5090 with 64 GB of RAM (smaller cards emulated by
 capping its VRAM). Every configuration is in [docs/measured.md](docs/measured.md), and every run's report in
-[research/](research/README.md).
+[research/](research/README.md). Results from Repertory's own benchmark and the head-to-head of models, by GPU and
+preset, are in [docs/benchmarks.md](docs/benchmarks.md).
 
 <!-- measured-summary:begin -->
 | Card (VRAM) | Quant | Context | Decode | Prefill |
@@ -160,7 +161,8 @@ capping its VRAM). Every configuration is in [docs/measured.md](docs/measured.md
 - [Manager guide](docs/manager.md): starting, setup, sharing the GPU, benchmarks, security, other machines
 - [API](docs/api.md): Responses, Chat Completions and the control API
 - [Engines and models](docs/engines.md): what runs where, and what adding a model takes
-- [Measured](docs/measured.md) and [run records](research/README.md)
+- [Benchmarks](docs/benchmarks.md) (speed and quality by GPU and preset), [Measured](docs/measured.md) and
+  [run records](research/README.md)
 - Research: [two GPUs](docs/research/multi-gpu.md), [two PCs over the network](docs/research/cross-pc-split.md)
 
 ## Credits

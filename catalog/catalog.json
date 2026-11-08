@@ -1003,7 +1003,129 @@
         }
       ],
       "cpu_execution": "experimental",
-      "offer_untested": false
+      "offer_untested": false,
+      "curation": {
+        "status": "untested",
+        "date": "2026-11-08",
+        "machine": {
+          "gpu": "NVIDIA GeForce RTX 5090",
+          "vram_gb": 34.19,
+          "ram_gb": 68.3,
+          "platform": "windows-wsl"
+        },
+        "engine_commit": "fac07b78f993d3a582e829607761a6dbf81d661e",
+        "checks": {
+          "compat": {
+            "ok": true,
+            "date": "2026-11-08",
+            "engine_commit": "fac07b78f993d3a582e829607761a6dbf81d661e",
+            "machine": {
+              "gpu": "NVIDIA GeForce RTX 5090",
+              "vram_gb": 34.2,
+              "ram_gb": 68.3,
+              "platform": "windows-wsl",
+              "os": "Windows 11 (build 10.0.26200)"
+            },
+            "items": [
+              {
+                "name": "entry",
+                "ok": true,
+                "detail": "valid against catalog/schema.json"
+              },
+              {
+                "name": "engine",
+                "ok": true,
+                "detail": "exl3-offload on windows-wsl: NVIDIA GeForce RTX 5090 (sm_120, 32 GB), driver 617.14"
+              },
+              {
+                "name": "pin",
+                "ok": true,
+                "detail": "turboderp/GLM-5.3-Flash-exl3 at 51058cd551c7 (branch 2.05bpw)"
+              },
+              {
+                "name": "architecture",
+                "ok": true,
+                "detail": "Glm5NextForConditionalGeneration (glm5_next), exl3 2.05 bits, from the downloaded folder"
+              },
+              {
+                "name": "fits",
+                "ok": true,
+                "detail": "256K context, 2,624 experts in 29.5 GB of VRAM, a 39 GiB RAM cache: 77% of the experts in memory"
+              },
+              {
+                "name": "files",
+                "ok": true,
+                "detail": "24 files, each checked against its hash (the pinned revision's list); store store/glm205.bin packed"
+              }
+            ],
+            "numbers": {
+              "vram_budget_gb": 29.5,
+              "ram_gb": 68.3,
+              "context": 262144,
+              "prefill_chunk": 16384,
+              "staging": true,
+              "vram_experts": 2624,
+              "ram_cache_gib": 39,
+              "in_memory_pct": 76.7
+            },
+            "summary": "compatible"
+          },
+          "regression": {
+            "ok": null,
+            "date": "2026-11-08",
+            "items": [
+              {
+                "name": "natural ends",
+                "ok": true,
+                "detail": "every answer ended by itself"
+              },
+              {
+                "name": "tool call",
+                "ok": true,
+                "detail": "get_weather({\"city\": \"Lisbon\"})"
+              },
+              {
+                "name": "document",
+                "ok": true,
+                "detail": "Technician Ilsa Varga serviced the backup generator, and the code word is PERIWINKLE."
+              },
+              {
+                "name": "thinking",
+                "ok": true,
+                "detail": "reasoned before answering"
+              },
+              {
+                "name": "tokens",
+                "ok": true,
+                "detail": "521 answer tokens with their logprobs"
+              },
+              {
+                "name": "decode",
+                "ok": true,
+                "detail": "each answer's decode took the forward pass's likeliest tokens, near ties aside"
+              }
+            ],
+            "engine_commit": "fac07b78f993d3a582e829607761a6dbf81d661e",
+            "machine": {
+              "gpu": "NVIDIA GeForce RTX 5090",
+              "vram_gb": 34.19,
+              "ram_gb": 68.3,
+              "platform": "windows-wsl"
+            },
+            "summary": "reference recorded in glm-5.3-flash-exl3-2.05.json: decode 20.07 tok/s, prefill 2262.2 tok/s; run the check again to compare against it",
+            "numbers": {
+              "decode_tps": 20.07,
+              "prefill_tps": 2262.2,
+              "recorded": true,
+              "context": 262144,
+              "ram_gib": 39,
+              "vram_gb": 28.94,
+              "vram_experts": 2784,
+              "startup_s": 90.5
+            }
+          }
+        }
+      }
     }
   ]
 }

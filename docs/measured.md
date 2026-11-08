@@ -30,4 +30,5 @@ the fastest setup per card size; each row here links to the run's report.
 
 The table is generated from the measurements in [sizing.py](../engines/exl3_offload/sizing.py)
 (`python3 engines/exl3_offload/sizing.py presets --write docs/measured.md`). Every run, with its raw results, is
-listed in [research/](../research/README.md).
+listed in [research/](../research/README.md). Runs of Repertory's own benchmark, and the head-to-head of models,
+are in [Benchmarks](benchmarks.md), by GPU and preset.

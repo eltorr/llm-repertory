@@ -2,6 +2,24 @@
 
 What changed in Repertory, newest first.
 
+## 2026-11-08: Benchmark page and the head-to-head
+
+- **A results log and the benchmark page** ([docs/benchmarks.md](docs/benchmarks.md)): `python -m repertory results
+  add` logs benchmark runs (a run's JSON or a bench folder) and head-to-head results into `results/speed.jsonl` and
+  `results/quality.jsonl`; `python -m repertory results page` regenerates the page, speed grouped by GPU, RAM and
+  platform, then by card preset (largest first, capped runs marked), and a table of the head-to-head per task. A line
+  holds the facts the page shows and the stack, no host names, prompts or answers; a run logged again replaces its
+  line. The page says how to add a machine's results.
+- **The head-to-head** ([research/head-to-head](research/head-to-head/REPORT.md)): seven short tasks that need real
+  reasoning (three coding tasks graded by tests, two problems with one right answer, a support ticket with simulated
+  tools, an incident log), run with thinking on at `high`, no output cap, 20 minutes a task. Qwen3.8-Flash-Next 4.05
+  passed 6, GLM-5.3-Flash 3.05 and 2.05 passed 5. Each solved two of the three coding tasks; GLM did them in 11-12
+  minutes, Qwen in 45 (at xhigh, which Qwen runs for `high`). `run.py` records the setup it ran on from the manager.
+- **GLM-5.3-Flash 2.05's curation, so far:** its files, pin, architecture and fit pass and its reference is recorded
+  (20.1 tok/s, the document read at 2,262 tok/s); it stays unoffered until the comparison run passes. That run is
+  still to do: loading GLM 2.05 with a 40 GiB RAM cache took free RAM down to 1.4 GB here, and the benchmark stepped
+  aside for it.
+
 ## 2026-11-08: Benchmarks leave the PC its RAM
 
 - **A benchmark run no longer starves the PC of RAM.** GLM 2.05's comparison run took Windows down to 1 GB free:
