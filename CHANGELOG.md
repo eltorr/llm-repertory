@@ -2,6 +2,28 @@
 
 What changed in Repertory, newest first.
 
+## 2026-11-07: the catalog drives the platform; curation
+
+- **The catalog is read** ([docs](docs/catalog.md)): `repertory/catalog.py` loads `catalog/catalog.json` and checks
+  it against its schema (a small validator, no new package) and for what a schema can't say: unique ids, engines
+  that exist and read the model's format, paths inside the engine checkout.
+- **What reads it:** setup has one model step per model, with its label, sizes, paths and pin;
+  `setup/50_model.sh` takes the folder, store, repository, revision and branch as options and `setup/check.sh` is
+  told where each model lives (both still work called the old way). The Settings tab's model versions, the name
+  `/v1/models` lists, the engine's `MODEL_DIR` and `STORE`, and sizing's per-model numbers come from it too.
+  Sizing's results are unchanged, and so are the README's tables.
+- **Still written for Qwen:** the preset rule, the benchmark's matrix, sizing's activation and staging constants,
+  the scripts' defaults for a run by hand, and the model server's chat format.
+- **Curation:** `repertory curate MODEL` checks an entry before it is offered. Compatibility, with no GPU: the entry,
+  its engine on this platform, GPU and driver, the model's architecture and format, the pin, whether it fits this
+  PC, and a downloaded model's recorded file hashes. Regression, on the GPU through the benchmark (a new `reference`
+  workload: five fixed greedy requests): the answers must match the recorded reference exactly, and decode and
+  prefill come within 15% and 10% of its speeds. `--record` records a reference. The result goes into the entry's
+  `curation`: curated, failed or untested, with the date, the machine, the engine commit and every check's items.
+- **What is offered:** curated entries, and untested ones marked `offer_untested`. The two Qwen quants are marked:
+  they stay offered, shown as untested, until their GPU run passes. A failed entry is offered only with the new
+  setting *Also offer models that haven't passed curation*.
+
 ## 2026-11-07: security
 
 The repository is public. Before it went public, every commit was checked for private data, and the code scanning
