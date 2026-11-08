@@ -484,12 +484,12 @@ class RegressionTests(unittest.TestCase):
     def test_slower_decode_fails(self):
         self.regression(record=True)
         FakeEngine.token_s = 0.03                                          # several times slower a token
-        with mock.patch.object(curate, "DECODE_TOLERANCE", 0.10):
+        with mock.patch.object(curate, "DECODE_TOLERANCE", 0.15):
             r = self.regression()
         items = by_name(r)
         self.assertTrue(items["short"]["ok"])                               # same answers...
         self.assertFalse(items["decode"]["ok"])                             # ...too slowly
-        self.assertLess(r["numbers"]["decode_change_pct"], -10)
+        self.assertLess(r["numbers"]["decode_change_pct"], -15)
 
     def test_another_machine_compares_answers_but_not_speed(self):
         self.regression(record=True)
@@ -550,20 +550,20 @@ class SpeedTests(unittest.TestCase):
                 "cases": rec["reference"]["cases"]}
 
     def test_within_the_tolerance(self):
-        items, numbers = curate.compare(self.ref(), self.record(54.6, 4510.0))     # 9% and 9.8% slower
+        items, numbers = curate.compare(self.ref(), self.record(51.6, 4510.0))     # 14% and 9.8% slower
         self.assertEqual(curate.outcome(items), True)
-        self.assertEqual((numbers["decode_change_pct"], numbers["prefill_change_pct"]), (-9.0, -9.8))
+        self.assertEqual((numbers["decode_change_pct"], numbers["prefill_change_pct"]), (-14.0, -9.8))
         items, _ = curate.compare(self.ref(), self.record(80.0, 9000.0))            # faster never fails
         self.assertEqual(curate.outcome(items), True)
 
     def test_beyond_it(self):
-        items, _ = curate.compare(self.ref(), self.record(53.0, 5000.0))
+        items, _ = curate.compare(self.ref(), self.record(50.4, 5000.0))           # 16% slower
         self.assertFalse(by_name({"items": items})["decode"]["ok"])
-        items, _ = curate.compare(self.ref(), self.record(60.0, 4400.0))
+        items, _ = curate.compare(self.ref(), self.record(60.0, 4400.0))           # 12% slower
         self.assertFalse(by_name({"items": items})["prefill"]["ok"])
 
-    def test_the_tolerances_are_ten_percent(self):
-        self.assertEqual((curate.DECODE_TOLERANCE, curate.PREFILL_TOLERANCE), (0.10, 0.10))
+    def test_the_tolerances(self):
+        self.assertEqual((curate.DECODE_TOLERANCE, curate.PREFILL_TOLERANCE), (0.15, 0.10))
 
 
 # ------------------------------------------------------------------------------------------------- the result

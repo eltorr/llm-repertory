@@ -40,15 +40,15 @@ from .config import GB, GIB, MAXIMUM
 
 from engines.exl3_offload import sizing  # noqa: E402
 
-# How much slower than the reference a run may be before the regression check fails.
-# Decode: the same configuration measured within ~3-5% run to run (research/vram-scaling-torch-2.15: 59.7 and 61.0
-# tok/s for 4.05 on the whole card with 34 and 40 GiB RAM caches), and a whole-card run's VRAM budget moves with what
-# the desktop holds at the time (a few hundred experts more or fewer in VRAM: a few % of decode); answers of 90-260
-# tokens add timing noise. 10% stays clear of that and still catches what regressions have looked like here (a VRAM
-# cache sized 20% smaller cost 15% of decode, research/engine-parity). Faster is never a failure.
-DECODE_TOLERANCE = 0.10
+# How much slower than the reference a run may be before the regression check fails. Faster never fails.
+# Decode: in research/vram-scaling-torch-2.15, the three trials of one whole-card run were up to 9.6% apart (the first,
+# with colder caches, slowest), though the medians of separate runs of one configuration came within 2%. A
+# whole-card run's VRAM cache also follows what the desktop holds at the time, and these answers are short (90-260
+# tokens). 15% stays clear of that, and still catches a loss like the one a 20% smaller VRAM cache caused (17% on the
+# short answer, research/engine-parity).
+DECODE_TOLERANCE = 0.15
 # Prefill: the 73K-token document's first token came within 2.5% across four runs (12.39-12.70 s,
-# research/engine-parity); 10% for the same margin as decode.
+# research/engine-parity), and 32-64K documents within 0.3-6.7% between trials; 10%.
 PREFILL_TOLERANCE = 0.10
 HUB = "https://huggingface.co"
 PLATFORMS = {"linux": "linux-x86_64", "windows-wsl": "windows-wsl2"}     # host kinds as the catalog names them
