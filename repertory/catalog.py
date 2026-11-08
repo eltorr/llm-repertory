@@ -125,9 +125,10 @@ def validate(value, schema, root=None, path="$"):
 
 
 def _relative(p):
-    """A path inside the engine checkout: relative, no '..' (setup and the checks build file paths from it)."""
+    """A path inside the engine checkout: relative, no '..', plain characters (setup's scripts take it as an argument
+    and the checks build file paths from it)."""
     q = PurePosixPath(p)
-    return bool(p) and not q.is_absolute() and ".." not in q.parts and "\\" not in p and ":" not in p
+    return bool(re.fullmatch(r"[A-Za-z0-9._/-]+", p)) and not q.is_absolute() and ".." not in q.parts
 
 
 def problems(data):

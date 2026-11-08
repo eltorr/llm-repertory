@@ -28,8 +28,8 @@ import threading
 import time
 import urllib.parse
 
-from . import config
-from .config import GB, GIB, LOG_DIR, REPO, SERVED_NAME, SERVICE_KEYS, log
+from . import catalog, config
+from .config import GB, GIB, LOG_DIR, REPO, SERVICE_KEYS, log
 from .host import make_host
 from .httpio import (BACKEND_KEY_HEADER, HTTPError, StreamStats, backend_request, close, http_get_json, http_ok,
                      http_post_json, oai_error, pipe, read_body, read_head, respond)
@@ -341,9 +341,27 @@ class Service:
             await asyncio.sleep(0.25)
         return self.mon.get()
 
+    # ================================================================ the catalog's models
+    def model(self):
+        """The configured model's catalog entry (settings only take quants the catalog has)."""
+        cat = catalog.load()
+        return cat.find(self.cfg["quant"]) or cat.models_for(sizing.ENGINE)[0]
+
+    def model_choices(self):
+        """The models the dashboard offers (catalog.offered, or every one with offer_uncurated), and the chosen one
+        whatever its state, with their curation state."""
+        show_all = self.cfg["offer_uncurated"]
+        return [{"quant": m["quant"], "label": m["label"], "model": m["id"], "curation": catalog.status(m),
+                 "offered": catalog.offered(m)}
+                for m in catalog.load().models_for(sizing.ENGINE)
+                if catalog.offered(m, show_all) or m["quant"] == self.cfg["quant"]]
+
     def profile_env(self, tier, m, plan):
         cfg = self.cfg
+        paths = self.model()["paths"]
         env = {"QUANT": cfg["quant"], "CONTEXT": str(cfg["context"]), "PORT": str(cfg["backend_port"]),
+               # where the model and its expert store are, from the catalog (run.sh has Qwen's as defaults)
+               "MODEL_DIR": "./" + paths["model_dir"], "STORE": "./" + paths["store"],
                # loopback only: WSL forwards Windows' localhost to it, and nothing else on the VM's network reaches it
                "HOST": "127.0.0.1",
                # the manager handles contention; never let the in-process guard hard-kill a request
@@ -879,7 +897,9 @@ class Service:
 
     # ================================================================ the network port
     def models_list(self):
-        return {"object": "list", "data": [{"id": SERVED_NAME, "object": "model", "created": 0,
+        # the catalog's name for the model; the engine's own server keeps its default, the same for Qwen (it serves
+        # only Qwen: engines/exl3_offload/qwen_chat.py)
+        return {"object": "list", "data": [{"id": catalog.served_name(self.model()), "object": "model", "created": 0,
                                             "owned_by": "repertory", "max_model_len": self.cfg["context"]}]}
 
     async def bind_front(self):
@@ -1023,7 +1043,7 @@ class Service:
             "ram_growing": bool(self.ram_growing),
             "quant": self.be.quant or cfg["quant"],
             "context": cfg["context"], "endpoint": f"http://{host}:{cfg['listen_port']}/v1",
-            "served_name": SERVED_NAME, "since": self.be.since, "startup_s": self.be.startup_s,
+            "served_name": catalog.served_name(self.model()), "since": self.be.since, "startup_s": self.be.startup_s,
             "error": self.be.error, "paused_reason": self.paused_reason, "ram_cache_gib": self.be.ram_gib,
             "budget_gb": round(self.be.budget / GB, 1) if self.be.budget else None, "adopted": self.be.adopted,
             "manual_lean": self.manual_lean, "ram_overhead_gb": round(self.ram_overhead() / GB, 1),
@@ -1043,7 +1063,7 @@ class Service:
             "autostart": self.host.autostart_enabled(), "platform": self.host.kind, "platform_label": self.host.label,
             "observe": self.observe, "engine_sync": self.engine_sync(),
             "recommendations": hw.get("recommendations"),
-            "quants": {q: {"label": v["label"]} for q, v in sizing.QUANTS.items()},
+            "quants": {c["quant"]: c for c in self.model_choices()},
             # where other devices reach the API and, with the private link, the dashboard
             "remote": {"port": cfg["network_port"] if self.front_server else 0,
                        "host": cfg["remote_host"] or socket.gethostname().lower()},
@@ -1085,7 +1105,7 @@ class Service:
             # other devices already hold the link; they don't need it handed back
             cfg = self.cfg if local else {**self.cfg, "dashboard_token": ""}
             await respond(writer, 200, {"config": cfg, "defaults": config.DEFAULTS,
-                                        "service_keys": sorted(SERVICE_KEYS)})
+                                        "service_keys": sorted(SERVICE_KEYS), "models": self.model_choices()})
         elif route == "config" and method == "POST":
             changes = data.get("config", {})
             await respond(writer, *self.update_config(changes if isinstance(changes, dict) else {}, local))

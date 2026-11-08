@@ -49,7 +49,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import config
+from . import catalog, config
 from .config import GB, GIB, log
 from .httpio import BACKEND_KEY_HEADER, http_ok
 
@@ -59,8 +59,9 @@ BENCH_DIR = config.STATE / "bench"
 RUN_DIR = re.compile(r"^\d{8}-\d{6}(-\d+)?$")
 MAX_RUNS = 32
 PRESETS = {"current": "This machine's settings, whole card", "lean": "The lean profile",
-           "quants": "3.05 and 4.05 bpw, whole card", "matrix": "8-32 GB cards emulated on this one"}
+           "quants": f"{' and '.join(sizing.QUANTS)} bpw, whole card", "matrix": "8-32 GB cards emulated on this one"}
 # the README's measured table: card sizes after the desktop's share, each at the largest context that keeps staging.
+# Written for Qwen's two quants (it reproduces research/vram-scaling-torch-2.15), so hard-coded.
 # Every run gets the same RAM cache, as the earlier matrix (research/vram-scaling): sized from the RAM free when a run
 # starts, it varied with how much of the previous run's memory WSL had handed back yet (8-25 GiB a run).
 MATRIX_RAM = 38
@@ -112,7 +113,7 @@ def parse_run(spec):
                          f"[:prefetch] or a preset ({', '.join(PRESETS)})")
     quant, vram, ctx, *flags = parts
     if quant not in sizing.QUANTS:
-        raise ValueError(f"unknown quant {quant!r} (3.05 or 4.05)")
+        raise ValueError(f"unknown quant {quant!r} ({' or '.join(sizing.QUANTS)})")
     vram_gb = None if vram == "card" else float(vram)
     if vram_gb is not None and not 4 <= vram_gb <= 512:
         raise ValueError(f"VRAM {vram!r} out of range (4-512 GB, or card)")
@@ -154,7 +155,7 @@ def expand(specs, cfg, lean_gb=None):
                 raise ValueError("the lean profile's VRAM isn't known yet (no GPU sample)")
             runs.append(parse_run(f"{cfg['quant']}:{lean_gb:.1f}:{cfg['context']}:ram={int(cfg['lean_ram_gb'])}"))
         elif s == "quants":
-            runs += [parse_run(f"{q}:card:{cfg['context']}") for q in ("3.05", "4.05")]
+            runs += [parse_run(f"{q}:card:{cfg['context']}") for q in sizing.QUANTS]
         elif s == "matrix":
             runs += [parse_run(x) for x in MATRIX]
         else:
@@ -170,9 +171,10 @@ def expand(specs, cfg, lean_gb=None):
 class Client:
     """HTTP to the engine under test, with the manager's key on every request."""
 
-    def __init__(self, port, key):
+    def __init__(self, port, key, model="qwen3.8-flash-next"):
         self.base = f"http://127.0.0.1:{port}"
         self.headers = {"Content-Type": "application/json", **({BACKEND_KEY_HEADER: key} if key else {})}
+        self.model = model                     # the name requests carry (the catalog's served name)
 
     def get(self, path, timeout=10):
         with urllib.request.urlopen(urllib.request.Request(self.base + path, headers=self.headers),
@@ -217,7 +219,7 @@ class Client:
 
     def answer(self, content):
         """One chat answer: thinking off, greedy, streamed to its natural end (no max_tokens)."""
-        body = {"model": "qwen3.8-flash-next", "stream": True, "temperature": 0,
+        body = {"model": self.model, "stream": True, "temperature": 0,
                 "chat_template_kwargs": {"enable_thinking": False}, "messages": [{"role": "user", "content": content}]}
         t0 = time.perf_counter()
         first = last = usage = None
@@ -688,7 +690,9 @@ class Bench:
                                 svc.learned.get(svc.learned_key(r["quant"], r["context"]), {}).get("ram_cap")) if c]
             ram_gib = sizing.ram_cache_gib(target, svc.ram_for_start(m), cfg, svc.ram_overhead(r["quant"]),
                                            min(caps) if caps else None)
+        paths = catalog.load().model(r["quant"])["paths"]
         env = {"QUANT": r["quant"], "CONTEXT": str(r["context"]), "PORT": str(cfg["backend_port"]),
+               "MODEL_DIR": "./" + paths["model_dir"], "STORE": "./" + paths["store"],
                "HOST": "127.0.0.1", "RAM_GB": str(ram_gib)}
         if r["vram_gb"] is None:
             env["QWEN_VRAM_LIMIT_BYTES"] = str(int(m["vram_total"] - svc.headroom(m)))
@@ -736,7 +740,8 @@ class Bench:
         def save():
             path.write_text(json.dumps(rec, indent=1))
         have = (svc.setup.hw or {}).get("engine") or {}
-        if have.get("driver") and have.get("m305" if r["quant"] == "3.05" else "m405") != "1":
+        model = catalog.load().model(r["quant"])
+        if have.get("driver") and have.get(catalog.setup_id(model)) != "1":
             rec["error"] = f"the {r['quant']} bpw model isn't downloaded (Setup tab)"
         elif not plan["ok"] and not r["nostage"]:
             rec["error"] = f"does not fit: {plan.get('reason')}"
@@ -769,7 +774,7 @@ class Bench:
                 self.emit(f"  ready in {rec['startup_s']:.0f} s: {rec['model_vram_gb']:.1f} GB VRAM, "
                           f"{rec['ram_gib']} GiB RAM cache")
                 save()
-                client = Client(cfg["backend_port"], svc.backend_key)
+                client = Client(cfg["backend_port"], svc.backend_key, catalog.served_name(model))
                 try:
                     await self.workload_steps(client, r, rec, save)
                     rec["engine"] = await asyncio.to_thread(client.engine_stats)

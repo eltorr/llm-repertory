@@ -140,9 +140,9 @@ def cmd_detect(cfg, a):
     if e:
         built = ", built for " + e["build_arch"] if e.get("build_arch") else ""
         ready = "ready" if e.get("engine") == "1" else "not set up"
+        models = ", ".join(f"{q} {'yes' if ok else 'no'}" for q, ok in hardware.installed(e).items())
         print(f"engine   {ready} at {cfg['repo_dir'] or 'this checkout'}; "
-              f"CUDA {e.get('cuda_version')}, torch {e.get('torch')}{built}; "
-              f"models: 3.05 {'yes' if e.get('m305') == '1' else 'no'}, 4.05 {'yes' if e.get('m405') == '1' else 'no'}")
+              f"CUDA {e.get('cuda_version')}, torch {e.get('torch')}{built}; models: {models}")
     print("recommendations:")
     print_recommendations(hw["recommendations"])
     return 0
@@ -219,8 +219,8 @@ def first_run_baseline(cfg):
         def present(q):
             root = Path(cfg["repo_dir"] or h.engine_dir)
             return (root / sizing.QUANTS[q]["model_dir"]).is_dir() and (root / sizing.QUANTS[q]["store"]).is_file()
-        other = "3.05" if settings["quant"] == "4.05" else "4.05"
-        if not present(settings["quant"]) and present(other):
+        others = [q for q in sizing.QUANTS if q != settings["quant"]]
+        if not present(settings["quant"]) and any(present(q) for q in others):
             settings.pop("quant")
             settings.pop("context")
     cfg.update(settings)

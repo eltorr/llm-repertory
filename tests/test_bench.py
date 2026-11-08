@@ -337,6 +337,7 @@ class BenchTests(unittest.TestCase):
         self.assertEqual(int(env["QWEN_VRAM_LIMIT_BYTES"]), int(2e9 + 10.5e9))
         self.assertEqual(int(env["QWEN_VRAM_GUARD_BYTES"]), int(2e9 + 10.5e9 + 0.25e9))
         self.assertEqual((env["QWEN_CHUNK"], env["RAM_GB"], env["CONTEXT"]), ("1536", "12", "131072"))
+        self.assertEqual((env["MODEL_DIR"], env["STORE"]), ("./model", "./store/qwen.bin"))     # from the catalog
         for k in ("QWEN_MTP", "QWEN_CPU_LANE", "GLM53_NV_PREFETCH"):
             self.assertNotIn(k, env)                                  # engine features stay off unless named
 

@@ -5,7 +5,8 @@
 #   engines/exl3_offload/run.sh server    OpenAI-compatible API on $HOST:$PORT (default 127.0.0.1:30000),
 #                                         context window $CONTEXT tokens (default 262144)
 #
-# Overrides (environment): QUANT (3.05 | 4.05), RAM_GB, MODEL_DIR, STORE, HOST, PORT,
+# Overrides (environment): QUANT (3.05 | 4.05, or another catalog model's with MODEL_DIR, STORE and RAM_GB), RAM_GB,
+#   MODEL_DIR, STORE (the manager passes both from the catalog), HOST, PORT,
 #   QWEN_VRAM_LIMIT_BYTES  device-wide VRAM the expert cache may grow into (includes other apps' VRAM)
 #   QWEN_TORCH_LIMIT_BYTES this process's torch allocator cap
 #   QWEN_VRAM_GUARD_BYTES  device-wide usage at which the server exits (76) instead of running out mid-request
@@ -24,11 +25,13 @@ GIB=1073741824
 calc() { awk "BEGIN { printf \"%d\", $1 }"; }
 
 QUANT="${QUANT:-3.05}"
+# Qwen's two quants for a run by hand: the catalog's paths, hard-coded here. The manager passes every model's.
 case "$QUANT" in
   # every expert: 48 layers x 512 experts x (1.843 MB | 2.457 MB)
   3.05) : "${MODEL_DIR:=./model}"      "${STORE:=./store/qwen.bin}";    EXPERT_BYTES=45290000000 ;;
   4.05) : "${MODEL_DIR:=./model-4.05}" "${STORE:=./store/qwen405.bin}"; EXPERT_BYTES=60380000000 ;;
-  *) echo "unknown QUANT=$QUANT (use 3.05 or 4.05)"; exit 2 ;;
+  *) [ -n "${MODEL_DIR:-}" ] && [ -n "${STORE:-}" ] && [ -n "${RAM_GB:-}" ] \
+       || { echo "unknown QUANT=$QUANT (use 3.05 or 4.05, or set MODEL_DIR, STORE and RAM_GB)"; exit 2; } ;;
 esac
 [ -d "$MODEL_DIR" ] || { echo "model not found at $MODEL_DIR (download it: setup/50_model.sh . $QUANT)"; exit 2; }
 [ -f "$STORE" ]     || { echo "expert store not found at $STORE (setup/50_model.sh . $QUANT packs it)"; exit 2; }
