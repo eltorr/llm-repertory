@@ -6,9 +6,10 @@ What changed in Repertory, newest first.
 
 - **A second model** ([docs](docs/engines.md#qwen-and-glm)): GLM-5.3-Flash at 3.05 bpw (`glm-3.05`, setup step
   `mglm305`, served as `glm-5.3-flash`), pinned to turboderp's upload, with its download and its expert store
-  (117.3 GB with the MTP layer). It isn't offered until it passes curation on a GPU. Its facts come from its
+  (117.3 GB with the MTP layer). Curated on the RTX 5090 on 2026-11-08 (KL 0 against its reference, the same text,
+  8-11 tok/s on curation's requests: about a fifth of Qwen 4.05's here). Its facts come from its
   config.json, ExLlamaV3's cache layout and glm53-flash-offload's docs; the VRAM outside the expert cache and the
-  activations per prompt token are the engine's own figures for this model, to be measured.
+  activations per prompt token are the engine's own figures for this model, which the GPU run bore out.
 - **Sizing per model:** a chunk's activations are a catalog fact, the staging-free chunk follows the model's top-k
   (1,792 tokens for GLM's top-8), and the share of the VRAM cache the engine may lend a prefill grows to what the
   plan needs (GLM's two staging buffers alone are 5.4 GB). Sizing stops at the manager's 262,144 tokens of context.

@@ -10,9 +10,10 @@ passed curation: a compatibility check and a regression check on the GPU (`reper
 - **The engine runs both.** sybil-solutions' glm53-flash-offload was built for GLM-5.3-Flash. Repertory added
   Qwen3.8-Flash-Next and kept GLM working: the engine's size limits cover both models (512 or 288 experts per layer,
   top-10 or top-8).
-- **GLM-5.3-Flash 3.05 bpw is in the catalog** (`glm-3.05`, served as `glm-5.3-flash`), and **untested until it is
-  curated**: it isn't offered until `repertory curate glm-3.05` passes on a GPU (setup and Settings show it with
-  *Also offer models that haven't passed curation*, or by name: `repertory setup mglm305`). Repertory gives it:
+- **GLM-5.3-Flash 3.05 bpw is in the catalog** (`glm-3.05`, served as `glm-5.3-flash`), **curated on the RTX 5090**
+  (2026-11-08): a fresh run reproduced its reference exactly (KL 0 on every answer, the same text), its decode took
+  the forward pass's likeliest token at all but 1-6 near ties an answer (at most 0.64 nat below it), and its speed
+  came within 3%. Repertory gives it:
   - the engine's `supports` and a catalog entry, with its facts (below);
   - sizing from those facts: its staging buffers (two of one layer's experts: 5.4 GB), the activations of a prefill
     chunk, the staging-free chunk for top-8 (1,792 tokens) and an elastic share big enough for its prefill;
@@ -31,16 +32,20 @@ passed curation: a compatibility check and a regression check on the GPU (`reper
   | store record bytes | 9,474,048 | the packer, and glm53-flash-offload's docs |
   | KV bytes per token (2, 4, 8, 16 bits) | 8,096, 9,504, 12,320, 17,600 | ExLlamaV3's MLA cache for its 11 sparse-attention layers: the 512-wide latent, the indexer's key plane and its pooled keys (`exllamav3/cache/mla.py`) |
   | largest context | 1,048,576 (sized up to the manager's 262,144) | config.json `max_position_embeddings` |
-  | non-expert VRAM | 8.65 GB, **to measure** | sybil-solutions' runs on an RTX 3090: 10.55-10.95 GB outside the expert cache at a 131,072-token FP16 context, less that context's KV cache |
-  | prefill activations per token | 0.6 MB, **to measure** | the engine's own estimate for this model (`GLM53_EC_ACT_MB_PER_TOK`) |
+  | non-expert VRAM | 8.65 GB | sybil-solutions' runs on an RTX 3090: 10.55-10.95 GB outside the expert cache at a 131,072-token FP16 context, less that context's KV cache. On the RTX 5090 sizing planned 1,728 VRAM experts and the engine took 1,696, the same 1-2% short of the plan as Qwen's runs |
+  | prefill activations per token | 0.6 MB | the engine's own estimate for this model (`GLM53_EC_ACT_MB_PER_TOK`); the 73K-token document ran within it |
 
-- **Not run on this engine yet:** curation's token replay for GLM (teacher forcing through `/generate`, ExLlamaV3's
-  cache-free attention on its sparse-attention and KDA layers), MTP, the CPU lane under Repertory, and any speed.
+- **Not run on this engine yet:** MTP and the CPU lane for GLM under Repertory.
 - **Still Qwen's:** the preset rule and the benchmark's matrix ([the catalog](catalog.md#an-entry)).
 - **Whether GLM is worth it on a given PC** is a separate question. At 3.05 bpw it is about 125 GB, more than a
-  32 GB card plus 64 GB of RAM, so more of it comes from the SSD: on the RTX 5090 with 64 GB, sizing plans about
-  1,700-1,900 experts in VRAM and a 34 GiB RAM cache at 256K, about half the experts in memory. sybil-solutions
-  measured 19.5 tok/s on an RTX 3090 with a 55 GiB RAM cap.
+  32 GB card plus 64 GB of RAM, so more of it comes from the SSD. On the RTX 5090 with 64 GB, at 256K with a 38 GiB
+  RAM cache, a token's expert picks came 50% from VRAM, 36% from RAM and 14% from the SSD, and curation's requests
+  ran at 8-11 tok/s (Qwen 4.05: 42-62 on the same requests) with the 73K-token document read at about 1,500 tok/s
+  (Qwen 4.05: about 6,200). Each GLM token moves about three times the expert bytes of a Qwen one, and a third of
+  them aren't in memory. sybil-solutions measured 19.5 tok/s on an RTX 3090 with a 55 GiB RAM cap, 8-channel RAM and
+  four NVMe drives in RAID0.
+- **Disk:** GLM takes about 243 GB (download and store). On Windows, check the free space of the drive that holds
+  WSL's disk image, not `df` inside WSL: WSL went down here when that drive filled during the store pack.
 
 ## Where the code runs
 
