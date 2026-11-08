@@ -27,10 +27,12 @@ From a terminal, which helps on headless machines:
 ```
 repertory detect          platform, GPU, CPU, RAM, WSL, engine and recommendations
 repertory setup           the setup steps and their status
-repertory setup STEP      run one step: wsl, wslconfig, distro, driver, base, engine, build, m305, m405
+repertory setup STEP      run one step: wsl, wslconfig, distro, driver, base, engine, build, and one per catalog
+                          model: m305, m405
 repertory plan            this machine's preset, and what fits at each quant
 repertory status          what the service is doing (--json for everything)
 repertory bench           benchmark this machine (see Benchmarks)
+repertory curate [MODEL]  the catalog's curation state, or curate a model (see docs/catalog.md)
 ```
 
 On Windows, run these as `.venv\Scripts\python -m repertory ...`; on Linux, as `./repertory.sh ...`.
@@ -46,7 +48,7 @@ On Windows, run these as `.venv\Scripts\python -m repertory ...`; on Linux, as `
 | Build tools + CUDA 13.2 | inside WSL | Ubuntu 22.04+ or Debian 12+; uses `sudo`, or prints the command to run |
 | Engine + Python environment | a clone of this checkout inside WSL, at the same commit | this checkout |
 | Compile GPU kernels | for the local GPU (Turing to Blackwell); after an update that changed the kernels, it shows **Update available** and rebuilds only those (`FULL_BUILD=1` rebuilds exllamav3 too) | same |
-| Models | 3.05 bpw (~85 GB download + 47 GB store) or 4.05 bpw (~107 + 62 GB); downloads resume | same |
+| Models | one step per catalog model on offer: 3.05 bpw (~85 GB download + 47 GB store) or 4.05 bpw (~107 + 62 GB); downloads resume | same |
 
 On Windows, when you commit a change here, *Engine + Python environment* shows **Update available**. Running it
 again syncs the WSL clone; only committed code is synced.
@@ -54,8 +56,11 @@ again syncs the WSL clone; only committed code is synced.
 **Model versions:**
 - **Source:** [turboderp/Qwen3.8-Flash-Next-exl3](https://huggingface.co/turboderp/Qwen3.8-Flash-Next-exl3) on
   Hugging Face.
-- **Pinned:** each quant is pinned to one upload (`PINNED` in `engines/exl3_offload/download.py`), so every install
-  gets the same files, even after newer uploads appear. A newer upload is only used once it has been tested and the pin changed.
+- **Pinned:** each quant is pinned to one upload (its `source.revision` in the [catalog](catalog.md)), so every
+  install gets the same files, even after newer uploads appear. A newer upload is only used once it has been tested
+  and the pin changed.
+- **Offered:** setup and the Settings tab offer the models that passed curation; the two Qwen quants are offered
+  as untested until their GPU run passes ([curation](catalog.md#curation)).
 - **Changing the pin:** running a model step again skips files that are already there. So after a pin change,
   delete that model's folder and its store file (`store/qwen*.bin`, `.json`), then run the step again.
 
@@ -181,7 +186,7 @@ repertory bench --list | --table FOLDER | --sizing FOLDER
 | `repertory/` | the manager: `service.py`, `host.py` (Windows + WSL2 or Linux), `hardware.py`, `setup.py`, `bench.py`, `ui/` |
 | `engines/exl3_offload/` | the engine's adapter: `server.py` (the model server), `run.sh` (starts it, sized from the hardware), `sizing.py` (the VRAM and RAM model, shared with the manager), `memory_guard.py`, `download.py`, `build_ext.py` |
 | `glm53-flash-offload/`, `exllamav3/` | the engine itself, as published upstream |
-| `catalog/` | the curated models and engines, and how to prepare and serve each pair |
+| `catalog/` | the models and engines, how to prepare and serve each pair, and each model's curation; `reference/` holds the regression references ([catalog](catalog.md)) |
 | `bin/repertory-backend` | runs the engine detached (a systemd unit where available) |
 | `setup/` | the install steps, shared by both platforms; `CUDA_VER` and `DRIVER_MIN` in `lib.sh` |
 | `tools/` | the checks (`scan.sh`), the package locks (`lock.sh`) and the pre-push hook |

@@ -110,11 +110,11 @@ token is `dashboard_token` in `config.json`. On the network port, `setup/run`, s
 |---|---|---|
 | GET | `status` | State, profile, pressure, GPU and RAM, counters, speed, events |
 | GET | `metrics` | The last 100 requests: tokens, time to first token, speeds |
-| GET / POST | `config` | POST `{"config": {"quant": "4.05"}}`; keys as in `config.json`, except the paths, programs, ports and token, which only `config.json` changes |
+| GET / POST | `config` | POST `{"config": {"quant": "4.05"}}`; keys as in `config.json`, except the paths, programs, ports and token, which only `config.json` changes. GET also lists the model versions on offer (`models`, from the catalog, with their curation state) |
 | POST | `action` | `{"action": "start_full"}`. Also `start_lean`, `pause`, `restart`, `auto_on`/`auto_off`, `wake_on`/`wake_off`, `new_remote_link`, `quit`, `quit_keep_model` |
 | GET | `log` | Tails of the model's and the manager's logs |
 | GET / POST | `setup`, `setup/run` | Setup status; `{"step": "build"}` runs one step |
-| GET / POST | `bench`, `bench/cancel` | Benchmark output and results (`?since=N`; `?run=NAME` for an earlier one); POST `{"runs": ["quants"], "workload": "quick"}` starts one, `{"resume": true}` continues the last one cut short |
+| GET / POST | `bench`, `bench/cancel` | Benchmark output and results (`?since=N`; `?run=NAME` for an earlier one); POST `{"runs": ["quants"], "workload": "quick"}` starts one (workloads `quick`, `standard`, `resize`, `resize-stress`, and `reference`, curation's), `{"resume": true}` continues the last one cut short |
 
 **What's refused:**
 

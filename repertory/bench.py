@@ -25,6 +25,9 @@ prefix cache.
   quick     1 trial: the answer, documents of 1K and 8K tokens                                   ~2 min a run
   standard  3 trials: the answer, documents of 1K, 8K, 32K and 64K tokens; then the retrieval
             test: three locker combinations at 15%, 50% and 85% of a log of up to 100K tokens    ~3-6 min a run
+  reference curation's regression requests (repertory/curate.py): after the warm-up, a short answer, code, a tool
+            call, a 73K-token document with one fact to find, and a short answer with thinking on, each answer
+            recorded whole (text, reasoning, tool calls, finish reason, token counts)            ~2 min a run
 Documents that don't fit the run's context are skipped; the retrieval document is sized to it. Runs before Repertory
 used the prompts and documents of the benchmark.py in MaxDevv/lean-qwenflash, which this project began as a fork of;
 results don't compare 1:1 with those (or with his), and runs are only compared with runs of the same protocol.
@@ -49,7 +52,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import config
+from . import catalog, config
 from .config import GB, GIB, log
 from .httpio import BACKEND_KEY_HEADER, http_ok
 
@@ -59,8 +62,9 @@ BENCH_DIR = config.STATE / "bench"
 RUN_DIR = re.compile(r"^\d{8}-\d{6}(-\d+)?$")
 MAX_RUNS = 32
 PRESETS = {"current": "This machine's settings, whole card", "lean": "The lean profile",
-           "quants": "3.05 and 4.05 bpw, whole card", "matrix": "8-32 GB cards emulated on this one"}
+           "quants": f"{' and '.join(sizing.QUANTS)} bpw, whole card", "matrix": "8-32 GB cards emulated on this one"}
 # the README's measured table: card sizes after the desktop's share, each at the largest context that keeps staging.
+# Written for Qwen's two quants (it reproduces research/vram-scaling-torch-2.15), so hard-coded.
 # Every run gets the same RAM cache, as the earlier matrix (research/vram-scaling): sized from the RAM free when a run
 # starts, it varied with how much of the previous run's memory WSL had handed back yet (8-25 GiB a run).
 MATRIX_RAM = 38
@@ -78,6 +82,8 @@ WORKLOADS = {
     # while it grows or frees memory must have its first token within latency_max_s (one from a cold cache: ~2 s)
     "resize-stress": {"document": 32768, "toggles": 4, "cancel_after_s": 1.0, "stop_after_s": 1.0,
                       "latency_max_s": 4.0},
+    # curation's regression requests (REFERENCE_CASES), which curate.py compares with the model's reference
+    "reference": {"protocol": "reference-1"},
 }
 VERIFY_BAD = ("vram_bad", "ram_bad", "table_bad", "home_bad_resident", "home_bad_nonresident", "dev_bad_rows")
 # The workload's text. Changing any of it is a new protocol: runs are compared only with runs of the same one.
@@ -102,6 +108,40 @@ MAX_YIELDS = 3                      # a run interrupted more often is recorded a
 RAM_FLOOR_GB = 1.0                  # free RAM below this: the PC is about to run out
 PLAN = "_plan.json"                 # the benchmark's runs and workload, for resuming (not a result)
 
+# Curation's regression requests: the cases of research/engine-parity/engine_compare.py, byte for byte (so its results
+# compare with these). Greedy, streamed, each answer to its natural end (never max_tokens); thinking off except in the
+# last. Changing any of them is a new protocol: every model's reference has to be recorded again.
+REFERENCE_PROTOCOL = WORKLOADS["reference"]["protocol"]
+REFERENCE_TOOLS = [{"type": "function", "function": {
+    "name": "get_weather", "description": "Current weather for a city",
+    "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}]
+
+
+def reference_document():
+    """2,400 station log lines (about 73K tokens) with one fact to find, at line 1717."""
+    lines = []
+    for i in range(2400):
+        t = 11 + (i * 7) % 23
+        w = (i * 13) % 41
+        lines.append(f"Station log {i:04d}: temperature {t} C, wind {w} km/h, pressure {990 + (i * 3) % 40} hPa.")
+    lines[1717] = "Station log 1717: the backup generator was serviced by technician Ilsa Varga; code word PERIWINKLE."
+    return "\n".join(lines)
+
+
+REFERENCE_CASES = (
+    ("short", {"messages": [{"role": "user", "content": "Explain in three sentences how a heat pump moves heat."}]}),
+    ("code", {"messages": [{"role": "user", "content":
+              "Write a Python function that returns the n-th Fibonacci number iteratively, with a docstring."}]}),
+    ("tool", {"messages": [{"role": "user", "content": "What's the weather in Lisbon right now?"}],
+              "tools": REFERENCE_TOOLS}),
+    ("document", {"messages": [{"role": "user", "content": reference_document() +
+                  "\n\nWho serviced the backup generator, and what is the code word? Answer in one sentence."}]}),
+    ("reasoning", {"messages": [{"role": "user", "content": "Is 221 a prime number? Answer briefly."}],
+                   "chat_template_kwargs": {"enable_thinking": True}}),
+)
+# what an answer is, for the comparison: everything but its timing
+REFERENCE_ANSWER = ("content", "reasoning", "tool_calls", "finish", "prompt_tokens", "completion_tokens")
+
 
 # ---------------------------------------------------------------------------------------------------------------- runs
 def parse_run(spec):
@@ -112,7 +152,7 @@ def parse_run(spec):
                          f"[:prefetch] or a preset ({', '.join(PRESETS)})")
     quant, vram, ctx, *flags = parts
     if quant not in sizing.QUANTS:
-        raise ValueError(f"unknown quant {quant!r} (3.05 or 4.05)")
+        raise ValueError(f"unknown quant {quant!r} ({' or '.join(sizing.QUANTS)})")
     vram_gb = None if vram == "card" else float(vram)
     if vram_gb is not None and not 4 <= vram_gb <= 512:
         raise ValueError(f"VRAM {vram!r} out of range (4-512 GB, or card)")
@@ -154,7 +194,7 @@ def expand(specs, cfg, lean_gb=None):
                 raise ValueError("the lean profile's VRAM isn't known yet (no GPU sample)")
             runs.append(parse_run(f"{cfg['quant']}:{lean_gb:.1f}:{cfg['context']}:ram={int(cfg['lean_ram_gb'])}"))
         elif s == "quants":
-            runs += [parse_run(f"{q}:card:{cfg['context']}") for q in ("3.05", "4.05")]
+            runs += [parse_run(f"{q}:card:{cfg['context']}") for q in sizing.QUANTS]
         elif s == "matrix":
             runs += [parse_run(x) for x in MATRIX]
         else:
@@ -170,9 +210,10 @@ def expand(specs, cfg, lean_gb=None):
 class Client:
     """HTTP to the engine under test, with the manager's key on every request."""
 
-    def __init__(self, port, key):
+    def __init__(self, port, key, model="qwen3.8-flash-next"):
         self.base = f"http://127.0.0.1:{port}"
         self.headers = {"Content-Type": "application/json", **({BACKEND_KEY_HEADER: key} if key else {})}
+        self.model = model                     # the name requests carry (the catalog's served name)
 
     def get(self, path, timeout=10):
         with urllib.request.urlopen(urllib.request.Request(self.base + path, headers=self.headers),
@@ -217,7 +258,7 @@ class Client:
 
     def answer(self, content):
         """One chat answer: thinking off, greedy, streamed to its natural end (no max_tokens)."""
-        body = {"model": "qwen3.8-flash-next", "stream": True, "temperature": 0,
+        body = {"model": self.model, "stream": True, "temperature": 0,
                 "chat_template_kwargs": {"enable_thinking": False}, "messages": [{"role": "user", "content": content}]}
         t0 = time.perf_counter()
         first = last = usage = None
@@ -237,6 +278,41 @@ class Client:
                 "prefill_tps": round(p / max(ttft, 1e-6), 1) if ttft is not None and p else None,
                 "decode_tps": round((n - 1) / (last - first), 2) if first and last and last > first and n > 1 else None,
                 "wall_s": round(time.perf_counter() - t0, 1), "answer": "".join(text)}
+
+    def reference(self, name, body):
+        """One of curation's requests (REFERENCE_CASES): greedy, streamed to its natural end (no max_tokens), thinking
+        off unless the case turns it on. The whole answer (text, reasoning, tool calls merged from their pieces,
+        finish reason, token counts) and its timing."""
+        body = dict(body, model=self.model, temperature=0, stream=True, stream_options={"include_usage": True})
+        body.setdefault("chat_template_kwargs", {"enable_thinking": False})
+        t0 = time.perf_counter()
+        first = last = usage = finish = None
+        content, reasoning, calls = [], [], {}
+        for t, ev in self.events("/v1/chat/completions", body):
+            usage = ev.get("usage") or usage
+            for choice in ev.get("choices") or ():
+                delta = choice.get("delta") or {}
+                if delta.get("content") or delta.get("reasoning_content") or delta.get("tool_calls"):
+                    first, last = first or t, t
+                content.append(delta.get("content") or "")
+                reasoning.append(delta.get("reasoning_content") or "")
+                for tc in delta.get("tool_calls") or ():
+                    call = calls.setdefault(tc.get("index", len(calls)), {"name": "", "arguments": ""})
+                    fn = tc.get("function") or {}
+                    call["name"] += fn.get("name") or ""
+                    call["arguments"] += fn.get("arguments") or ""
+                finish = choice.get("finish_reason") or finish
+        u = usage or {}
+        n, p = int(u.get("completion_tokens") or 0), int(u.get("prompt_tokens") or 0)
+        ttft = first - t0 if first else None
+        decode_s = last - first if first and last and last > first else None
+        return {"name": name, "content": "".join(content), "reasoning": "".join(reasoning),
+                "tool_calls": [calls[i] for i in sorted(calls)], "finish": finish, "prompt_tokens": p,
+                "completion_tokens": n, "cached_tokens": (u.get("prompt_tokens_details") or {}).get("cached_tokens"),
+                "ttft_s": round(ttft, 3) if ttft is not None else None,
+                "prefill_tps": round(p / max(ttft, 1e-6), 1) if ttft is not None and p else None,
+                "decode_tps": round((n - 1) / decode_s, 2) if decode_s and n > 1 else None,
+                "decode_s": round(decode_s, 4) if decode_s else None, "total_s": round(time.perf_counter() - t0, 3)}
 
     def engine_stats(self):
         """Where the expert picks came from, and the cache's size."""
@@ -272,6 +348,16 @@ def machine_facts(hw, kind, display):
             "stack": {"torch": e.get("torch"), "cuda": e.get("cuda_version"),
                       "driver": (hw.get("driver") or {}).get("version"),
                       "commit": (repo.get("head") or "")[:7] or None}}
+
+
+def reference_speed(cases):
+    """A reference run's speeds. Decode over every answer of 16+ tokens together (the tokens after the first, over the
+    time from the first to the last), which steadies the short ones; prefill from the long document (its prompt
+    tokens over the time to its first token)."""
+    timed = [c for c in cases if c.get("decode_s") and c["completion_tokens"] >= 16]
+    tokens, seconds = sum(c["completion_tokens"] - 1 for c in timed), sum(c["decode_s"] for c in timed)
+    doc = next((c for c in cases if c["name"] == "document"), {})
+    return {"decode_tps": round(tokens / seconds, 2) if seconds else None, "prefill_tps": doc.get("prefill_tps")}
 
 
 # ------------------------------------------------------------------------------------------------------------- results
@@ -688,7 +774,9 @@ class Bench:
                                 svc.learned.get(svc.learned_key(r["quant"], r["context"]), {}).get("ram_cap")) if c]
             ram_gib = sizing.ram_cache_gib(target, svc.ram_for_start(m), cfg, svc.ram_overhead(r["quant"]),
                                            min(caps) if caps else None)
+        paths = catalog.load().model(r["quant"])["paths"]
         env = {"QUANT": r["quant"], "CONTEXT": str(r["context"]), "PORT": str(cfg["backend_port"]),
+               "MODEL_DIR": "./" + paths["model_dir"], "STORE": "./" + paths["store"],
                "HOST": "127.0.0.1", "RAM_GB": str(ram_gib)}
         if r["vram_gb"] is None:
             env["QWEN_VRAM_LIMIT_BYTES"] = str(int(m["vram_total"] - svc.headroom(m)))
@@ -736,7 +824,8 @@ class Bench:
         def save():
             path.write_text(json.dumps(rec, indent=1))
         have = (svc.setup.hw or {}).get("engine") or {}
-        if have.get("driver") and have.get("m305" if r["quant"] == "3.05" else "m405") != "1":
+        model = catalog.load().model(r["quant"])
+        if have.get("driver") and have.get(catalog.setup_id(model)) != "1":
             rec["error"] = f"the {r['quant']} bpw model isn't downloaded (Setup tab)"
         elif not plan["ok"] and not r["nostage"]:
             rec["error"] = f"does not fit: {plan.get('reason')}"
@@ -769,7 +858,7 @@ class Bench:
                 self.emit(f"  ready in {rec['startup_s']:.0f} s: {rec['model_vram_gb']:.1f} GB VRAM, "
                           f"{rec['ram_gib']} GiB RAM cache")
                 save()
-                client = Client(cfg["backend_port"], svc.backend_key)
+                client = Client(cfg["backend_port"], svc.backend_key, catalog.served_name(model))
                 try:
                     await self.workload_steps(client, r, rec, save)
                     rec["engine"] = await asyncio.to_thread(client.engine_stats)
@@ -817,6 +906,8 @@ class Bench:
             return await self.resize_steps(client, r, rec, save)
         if self.workload == "resize-stress":
             return await self.stress_steps(client, r, rec, save)
+        if self.workload == "reference":
+            return await self.reference_steps(client, rec, save)
         wl = WORKLOADS[self.workload]
 
         def check():
@@ -864,6 +955,41 @@ class Bench:
             self.emit(f"  long document: {a['prompt_tokens']:,} tokens read at {fmt(a['prefill_tps'], '{:,.0f}')} "
                       f"tok/s, {'all three combinations found' if a['codes_found'] else 'combinations MISSED'}")
             save()
+
+    async def reference_steps(self, client, rec, save):
+        """Curation's regression requests (REFERENCE_CASES) after the warm-up, each answer recorded whole; curate.py
+        compares them with the model's reference. The figures the tables show come along: decode over the answers,
+        prefill and the fact found in the long document."""
+        def check():
+            if self.cancelled or self.yielded:
+                raise RuntimeError(self.why_stopped("stopped"))
+        for text in WARMUP:                                           # not scored
+            check()
+            await asyncio.to_thread(client.answer, text)
+        hw = self.svc.setup.hw or {}
+        cases = []
+        rec["engine_commit"] = (hw.get("engine") or {}).get("engine_head") or (hw.get("repo") or {}).get("head")
+        rec["reference"] = {"protocol": REFERENCE_PROTOCOL, "cases": cases}
+        for name, body in REFERENCE_CASES:
+            check()
+            a = await asyncio.to_thread(client.reference, name, body)
+            cases.append(a)
+            save()
+            calls = ", ".join(f"{c['name']}({c['arguments']})" for c in a["tool_calls"])
+            self.emit(f"  {name}: {a['completion_tokens']:,} tokens ({a['finish']}"
+                      + (f", calls {calls}" if calls else "") + f"), first token after {fmt(a['ttft_s'], '{:.2f}')} s"
+                      + (f", {fmt(a['decode_tps'])} tok/s" if a["decode_tps"] else ""))
+        speed = reference_speed(cases)
+        rec["reference"].update(speed)
+        rates = [c["decode_tps"] for c in cases if c.get("decode_tps") and c["completion_tokens"] >= 16]
+        rec["decode_tps_median"], rec["decode_tps_min"] = speed["decode_tps"], (min(rates) if rates else None)
+        rec["short_ttft_median_s"] = cases[0]["ttft_s"]
+        doc = next(c for c in cases if c["name"] == "document")
+        rec["long"] = {"prompt_tokens": doc["prompt_tokens"], "prefill_tps": doc["prefill_tps"],
+                       "needle_found": "PERIWINKLE" in doc["content"]}
+        self.emit(f"  reference: decode {fmt(speed['decode_tps'])} tok/s over the answers, the "
+                  f"{doc['prompt_tokens']:,}-token document read at {fmt(speed['prefill_tps'], '{:,.0f}')} tok/s")
+        save()
 
     def resize_kit(self, client, r, wl):
         """What the resize workloads share: answers, the per-size check, the manager's own switch requests, and the

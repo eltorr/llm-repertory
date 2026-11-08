@@ -37,11 +37,21 @@ c build "test -f $R/glm53-flash-offload/build/nv/glm53_nv.so && test -f $R/glm53
 BS=$(cat "$R/.repertory/build-src" 2>/dev/null)
 [ -n "$BS" ] && [ "$BS" = "$(bash "$(dirname "$0")/kernel_sources.sh" "$R" offload 2>/dev/null)" ] \
   && echo build_src=1 || echo build_src=0
-model_ok() { test -f "$R/$1/config.json" && ! ls "$R/$1/"*.part >/dev/null 2>&1 && test -f "$R/store/$2.bin" && test -f "$R/store/$2.json"; }
+# the models: KEY=MODEL_DIR:STORE arguments from the manager, from the catalog (m305=model:store/qwen.bin). Called
+# without them, as before the catalog drove setup: Qwen's two, hard-coded.
+shift 2>/dev/null || true
+MODELS=("$@")
+[ ${#MODELS[@]} -gt 0 ] || MODELS=(m305=model:store/qwen.bin m405=model-4.05:store/qwen405.bin)
+model_ok() { test -f "$R/$1/config.json" && ! ls "$R/$1/"*.part >/dev/null 2>&1 && test -f "$R/$2" && test -f "$R/${2%.bin}.json"; }
 export -f model_ok; export R
-c m305 "model_ok model qwen"
-c m405 "model_ok model-4.05 qwen405"
-for d in model model-4.05; do [ -d "$R/$d" ] && echo "partial_${d//[.-]/}=$(du -sb "$R/$d" 2>/dev/null | cut -f1)"; done
+inside() { case "/$1/" in //*|*/../*|*[!A-Za-z0-9._/-]*) return 1 ;; esac; }    # a plain path in the checkout
+for m in "${MODELS[@]}"; do
+  key=${m%%=*}; spec=${m#*=}; dir=${spec%%:*}; store=${spec#*:}
+  case "$key" in ''|*[!A-Za-z0-9_]*) echo "bad model spec: $m" >&2; continue ;; esac
+  if ! inside "$dir" || ! inside "$store"; then echo "bad model spec: $m" >&2; continue; fi
+  c "$key" "model_ok $dir $store"
+  [ -d "$R/$dir" ] && echo "partial_${dir//[.-]/}=$(du -sb "$R/$dir" 2>/dev/null | cut -f1)"
+done
 echo "disk_free_gb=$(df -B1000000000 --output=avail "$R" 2>/dev/null | tail -1 | tr -d ' ')"
 echo "fs=$(stat -f -c %T "$R" 2>/dev/null)"
 echo "mem_total_gb=$(awk '/MemTotal/ { printf "%d", $2 / 1e6 }' /proc/meminfo)"

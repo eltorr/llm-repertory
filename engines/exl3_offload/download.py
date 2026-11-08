@@ -1,9 +1,11 @@
 """Downloads one quant of the model from Hugging Face, at a pinned revision, and checks every file.
 
-    python engines/exl3_offload/download.py --model-dir ./model [--branch 3.05bpw_h5_ng5] [--sha REVISION]
+    python engines/exl3_offload/download.py --model-dir ./model [--branch 3.05bpw_h5_ng5] [--sha REVISION] [--repo R]
 
-- **Pinned:** each quant comes from one upload (PINNED), so a later upload to its branch can't change or mix an
-  install. To move to a newer one, test it, then change the revision here (or pass --sha).
+- **Pinned:** each model comes from one upload, so a later upload to its branch can't change or mix an install. Setup
+  passes the catalog's pin (catalog/catalog.json: source.huggingface and source.revision) as --repo and --sha; PINNED
+  below is the same pins, for running this by hand with only --branch. To move to a newer upload, test it, then
+  change the revision in the catalog (and here).
 - **Checked:** every file is compared with the hash the Hub lists for it (sha256 for large files, the git blob id
   for the rest) before it takes its name. Files checked once are noted in .verified.json, so a rerun is quick.
 - **Resumable:** a file in progress is NAME.part, with NAME.part.json listing the pieces it has; a rerun fetches the
@@ -21,13 +23,15 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import re
 import threading
 import time
 import urllib.parse
 import urllib.request
 from pathlib import Path, PurePosixPath
 
-REPO = "turboderp/Qwen3.8-Flash-Next-exl3"
+REPO = "turboderp/Qwen3.8-Flash-Next-exl3"   # the default --repo; setup passes the catalog's
+# the catalog's pins for Qwen's two quants, kept for a run by hand with only --branch (a test checks they match)
 PINNED = {"3.05bpw_h5_ng5": "69e33439ae950f17bcbe95c98f117d80f759ab6d",
           "4.05bpw_h6_ng6": "55a732e0c4c3d4614bc42b68493bb930d9b02c0a"}
 PIECE = 32 * 1024 ** 2
@@ -83,12 +87,12 @@ def file_digest(path, blob):
     return h.hexdigest()
 
 
-def upload(branch, sha):
+def upload(branch, sha, repo=REPO):
     """(revision, [Remote]) of the pinned upload."""
     from huggingface_hub import HfApi
     revision = sha or PINNED.get(branch)
     check(revision, f"no pinned revision for {branch}; pass --sha")
-    info = HfApi().model_info(REPO, revision=revision, files_metadata=True)
+    info = HfApi().model_info(repo, revision=revision, files_metadata=True)
     check(info.sha == revision, f"the Hub answered with revision {info.sha}, not {revision}")
     return revision, [Remote.from_hub(s) for s in info.siblings]
 
@@ -218,7 +222,7 @@ def plan(folder, files, verified):
     return todo
 
 
-def download(folder, revision, files):
+def download(folder, revision, files, repo=REPO):
     folder.mkdir(parents=True, exist_ok=True)
     verified = Verified(folder)
     partials = plan(folder, files, verified)
@@ -236,7 +240,7 @@ def download(folder, revision, files):
     def one(job):
         p, index = job
         start, end = p.remote.span(index)
-        url = f"https://huggingface.co/{REPO}/resolve/{revision}/{p.remote.name}"
+        url = f"https://huggingface.co/{repo}/resolve/{revision}/{p.remote.name}"
         p.write(start, fetch(url, start, end, p.remote.size))
         with lock:
             fetched[0] += end - start + 1
@@ -261,10 +265,13 @@ def main(argv=None):
     p.add_argument("--model-dir", type=Path, required=True, help="where the model goes, e.g. ./model")
     p.add_argument("--branch", default="3.05bpw_h5_ng5", help="the quant's branch (default 3.05bpw_h5_ng5)")
     p.add_argument("--sha", help="the revision to fetch (default: the one pinned for --branch)")
+    p.add_argument("--repo", default=REPO, help=f"the Hugging Face repository (default {REPO})")
     a = p.parse_args(argv)
-    revision, files = upload(a.branch, a.sha)
+    check(re.fullmatch(r"[\w.-]+/[\w.-]+", a.repo) and (a.sha is None or re.fullmatch(r"[0-9a-f]{40}", a.sha)),
+          f"bad --repo or --sha: {a.repo} {a.sha}")
+    revision, files = upload(a.branch, a.sha, a.repo)
     print("REVISION", a.branch, revision, flush=True)
-    download(a.model_dir.expanduser(), revision, files)
+    download(a.model_dir.expanduser(), revision, files, a.repo)
 
 
 if __name__ == "__main__":

@@ -19,7 +19,6 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 GB = 1e9
 GIB = 1024 ** 3
-SERVED_NAME = "qwen3.8-flash-next"
 IS_WINDOWS = sys.platform == "win32"
 # Windows programs by full path, and never a same-named program from the current folder (git, nvidia-smi...)
 SYSTEM32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
@@ -62,7 +61,9 @@ DEFAULTS = {
     "repo_dir": "",                     # engine checkout as the engine sees it ("" = platform default)
     "legacy_engine_dir": "",            # QwenFlash's engine checkout (set when its settings are imported): setup links
                                         # the models and expert stores there instead of downloading them again
-    "quant": "3.05",
+    "quant": "3.05",                    # a catalog model's quant (catalog/catalog.json); the first run replaces it
+                                        # with this machine's preset (sizing.baseline)
+    "offer_uncurated": False,           # also offer models that failed curation or haven't passed it yet
     "context": 262144,
     "listen_host": "127.0.0.1",
     "listen_port": 30000,

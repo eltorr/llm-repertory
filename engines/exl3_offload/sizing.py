@@ -1,20 +1,25 @@
-"""VRAM and RAM sizing for Qwen3.8-Flash-Next on this engine, as plain arithmetic (no torch, no GPU).
+"""VRAM and RAM sizing for the models this engine runs (today Qwen3.8-Flash-Next), as plain arithmetic (no torch, no
+GPU).
 
-One source of truth for run.sh (`python3 engines/exl3_offload/sizing.py env ...`) and the Repertory manager.
+One source of truth for run.sh (`python3 engines/exl3_offload/sizing.py env ...`) and the Repertory manager. The
+per-model numbers come from the catalog (catalog/catalog.json, each model's facts); the engine's own constants and the
+calibration below are here.
 
 Where VRAM goes (code refs: glm53-flash-offload/glm53/expert_cache.py, nv2.py; exllamav3 cache/quant.py):
   fixed     weights that stay on the GPU (attention, shared experts, routers, lm_head, per-expert scales), KV cache,
             DeltaNet state, CUDA context/kernels/graphs. Grows with context only through the KV cache.
   cache     expert cache: S slots of one expert record each (rec bytes), in 32-slot chunks.
   reserve   VRAM left free after the cache is allocated (GLM53_EC_RESERVE_GB).
-  prefill   two staging buffers of a whole layer (512 records each) plus activations for one chunk. They come out of
-            the reserve plus cache chunks the elastic cache lends back during prefill, so they are not extra.
+  prefill   two staging buffers of a whole layer (one record per expert of the layer) plus activations for one chunk.
+            They come out of the reserve plus cache chunks the elastic cache lends back during prefill, so they are not
+            extra.
 A plan fits when fixed + cache + reserve <= budget and cache + reserve - 0.35 GB >= prefill(chunk).
 
 Calibration (research/vram-scaling): VRAM used outside the expert cache measured 9.0 GB (3.05 bpw) and 9.44 GB
-(4.05 bpw) at 262,144 context and 6.85 GB at 64K (3.05), i.e. 6.15 / 6.62 GB plus the KV cache's 10,752 bytes per
-token; an 8 GB-class run used 6.39 GB at 16K. Activations per chunk token come from RTX 4090 runs published with
-MaxDevv/lean-qwenflash, which this project began as a fork of (a 24,576-token chunk fit with a 16 GB cap:
+(4.05 bpw) at 262,144 context and 6.85 GB at 64K (3.05), i.e. 6.15 / 6.62 GB (the catalog's fixed_vram_bytes) plus
+the KV cache's 10,752 bytes per token (kv_bytes_per_token); an 8 GB-class run used 6.39 GB at 16K. Activations per
+chunk token come from RTX 4090 runs published with MaxDevv/lean-qwenflash, which this project began as a fork of (a
+24,576-token chunk fit with a 16 GB cap:
 https://github.com/MaxDevv/lean-qwenflash/tree/fa9a772d9aa9b94a5653a2c6880eeb97af0d2e9d/research/4090-long). The
 reserves include ~0.3 GB of margin found by running long prompts on emulated 8-16 GB cards.
 
@@ -25,13 +30,22 @@ measurement tables from it and from MEASURED.
 import argparse
 import json
 import math
+import os
 import sys
+
+# the catalog module is the manager's, standard library only; run as a script (run.sh), the repo root isn't on the path
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from repertory import catalog  # noqa: E402
 
 GB = 1e9
 GIB = 1024 ** 3
-EXPERTS_PER_LAYER = 512
-MOE_LAYERS = 48
-ACT_BYTES_PER_TOKEN = 0.21e6          # the RTX 4090 runs above: a 24,576-token chunk fit, 32,768 did not
+ENGINE = "exl3-offload"               # this adapter's engine in the catalog
+# Measured on Qwen3.8-Flash-Next and kept here, not in the catalog, until a second model shows how it varies: the
+# activations per prompt token of a prefill chunk (they depend on the model's width). The RTX 4090 runs above: a
+# 24,576-token chunk fit, 32,768 did not.
+ACT_BYTES_PER_TOKEN = 0.21e6
 PREFILL_EXTRA = 0.3 * GB
 FRAGMENTATION = 0.5 * GB   # torch held 0.8-1 GB more than it used when staging was allocated on small cards
 ELASTIC_SLACK = 0.35 * GB
@@ -41,23 +55,36 @@ CHUNKS = (24576, 16384, 8192, 4096, 2048)   # below 2,048 staging-free 1,536-tok
 # NVMe in both), and the last 11% took 6 GiB of RAM.
 RAM_COVERAGE = 0.9
 # Forwards with fewer expert picks per layer than this skip prefill staging, which costs ~5.5 s whatever the prompt's
-# size (research/vram-scaling-torch-2.15). nv2's pick buffer holds 16,384: 1,638 tokens at 10 experts each.
+# size (research/vram-scaling-torch-2.15). nv2's pick buffer holds 16,384: 1,638 tokens at 10 experts each. Both are
+# the engine's, sized for Qwen's 10 experts per token; they stay here until a model with another top-k is added.
 STAGE_MIN_PICKS = 16384
 NO_STAGE_CHUNK = 1536           # without staging, nv2's pick buffer limits a chunk to 1,638 tokens
-KV_BYTES_PER_TOKEN = {2: 7_680, 4: 10_752, 8: 16_896, 16: 28_416}
 
-QUANTS = {
-    # rec: one expert record (gate + up + down trellis, 256-aligned); fixed0: non-expert VRAM at zero context
-    "3.05": {"rec": 1_843_200, "fixed0": 6.15 * GB, "model_dir": "model", "store": "store/qwen.bin",
-             "branch": "3.05bpw_h5_ng5", "download_gb": 85, "store_gb": 47, "label": "3.05 bpw (fastest)"},
-    "4.05": {"rec": 2_457_600, "fixed0": 6.62 * GB, "model_dir": "model-4.05", "store": "store/qwen405.bin",
-             "branch": "4.05bpw_h6_ng6", "download_gb": 107, "store_gb": 62, "label": "4.05 bpw (higher fidelity)"},
-}
+
+def _quants():
+    """The catalog's models for this engine, by quant, as sizing uses them. rec: one expert record (gate + up + down
+    trellis, 256-aligned); fixed0: non-expert VRAM at zero context; kv: KV cache bytes per token by KV bits."""
+    out = {}
+    for m in catalog.load().models_for(ENGINE):
+        f = m["facts"]
+        out[m["quant"]] = {
+            "rec": f["expert_bytes"], "fixed0": float(f["fixed_vram_bytes"]),
+            "experts_per_layer": f["experts_per_layer"], "moe_layers": f["moe_layers"],
+            "kv": {int(bits): n for bits, n in f["kv_bytes_per_token"].items()},
+            "max_context": f["max_context"], "model_dir": m["paths"]["model_dir"], "store": m["paths"]["store"],
+            "branch": m["source"].get("branch"), "download_gb": m["disk"]["download_gb"],
+            "store_gb": m["disk"]["prepared_gb"], "label": m["label"], "model": m["id"]}
+    return out
+
+
+QUANTS = _quants()
+KV_BITS = sorted({bits for q in QUANTS.values() for bits in q["kv"]})
 
 
 def expert_bytes(quant):
     """Every routed expert of the model (what VRAM cache + RAM tier + NVMe hold between them)."""
-    return QUANTS[quant]["rec"] * EXPERTS_PER_LAYER * MOE_LAYERS
+    q = QUANTS[quant]
+    return q["rec"] * q["experts_per_layer"] * q["moe_layers"]
 
 
 def ram_target(quant, vram_cache):
@@ -66,11 +93,11 @@ def ram_target(quant, vram_cache):
 
 
 def fixed_bytes(quant, context, kv_bits=4):
-    return QUANTS[quant]["fixed0"] + KV_BYTES_PER_TOKEN[kv_bits] * context
+    return QUANTS[quant]["fixed0"] + QUANTS[quant]["kv"][kv_bits] * context
 
 
 def stage_bytes(quant):
-    return 2 * EXPERTS_PER_LAYER * QUANTS[quant]["rec"]
+    return 2 * QUANTS[quant]["experts_per_layer"] * QUANTS[quant]["rec"]
 
 
 def prefill_bytes(quant, chunk, staging=True):
@@ -143,10 +170,10 @@ def min_budget(quant, context, kv_bits=4):
 
 
 def max_context(quant, budget, kv_bits=4, step=16384, staging=True):
-    """Largest context (multiple of `step`, at most 262,144) that still leaves a workable plan, with staged
-    prefill (or, with staging=False, in either prefill mode)."""
+    """Largest context (multiple of `step`, at most the model's max_context: 262,144 for Qwen) that still leaves a
+    workable plan, with staged prefill (or, with staging=False, in either prefill mode)."""
     best = 0
-    for ctx in range(step, 262144 + 1, step):
+    for ctx in range(step, QUANTS[quant]["max_context"] + 1, step):
         p = plan(quant, budget, ctx, kv_bits)
         if p["ok"] and (p["staging"] or not staging):
             best = ctx
@@ -265,6 +292,13 @@ def best_context_plan(quant, budget, kv_bits=4):
     return p if p["ok"] else None
 
 
+def fit(quant, budget, ram_total, platform, kv_bits=4):
+    """How one model would start on a machine, as baseline() sizes it: its context, prefill chunk, VRAM experts,
+    RAM cache, share of the experts in memory and whether the RAM fits (ram_fits); None when `budget` bytes of VRAM
+    can't run it at all. Curation's "fits this PC" check uses it."""
+    return _candidate(quant, budget, ram_total, platform, kv_bits)
+
+
 def _candidate(quant, budget, ram_total, platform, kv_bits):
     p = best_context_plan(quant, budget, kv_bits)
     if p is None:
@@ -287,7 +321,10 @@ def baseline(vram_total, ram_total, display=True, platform="linux", kv_bits=4):
     4.05 bpw (higher fidelity) where it keeps 256K context, full-size prefill chunks and nearly every expert in VRAM
     or RAM. Otherwise 3.05 bpw: its experts are 25% smaller, so it is faster at every card size
     (research/vram-scaling), at the largest context that keeps prefill staging, or staging-free at 16K on 8 GB
-    cards. `settings` holds the manager settings that realize it."""
+    cards. `settings` holds the manager settings that realize it.
+
+    This choice is written for the two Qwen quants and names them (hard-coded until a second family needs a preset
+    rule of its own); the numbers behind it come from the catalog."""
     budget = card_budget(vram_total, display)
     out = {"vram_total": vram_total, "ram_total": ram_total, "display": display, "platform": platform,
            "budget": budget, "ok": False, "measured": []}
@@ -330,7 +367,9 @@ def measured_for(b):
     return sorted(found, key=lambda m: (m.get("capped", False), abs(m["ram_cache_gib"] - b["ram_cache_gib"])))
 
 
-# Measurements behind the presets. card: VRAM class in GiB; ram: the machine's RAM in GiB; ram_cache_gib: the RAM
+# Measurements behind the presets (the README's tables are generated from them; they stay here, by quant, rather than
+# in the catalog, whose `measured` lists each model's headline figure). card: VRAM class in GiB; ram: the machine's
+# RAM in GiB; ram_cache_gib: the RAM
 # cache the run had; capped: the engine was held to that card size on a bigger card (VRAM capacity only: a real card
 # of that size has less bandwidth). Add rows as real cards and other RAM sizes are measured (`repertory bench`,
 # then `repertory bench --sizing FOLDER` prints rows in this format).
@@ -489,7 +528,7 @@ def main(argv=None):
         s.add_argument("--quant", default="3.05", choices=sorted(QUANTS))
         s.add_argument("--budget-gb", type=float, required=True, help="VRAM for this process, GB (1e9)")
         s.add_argument("--context", type=int, default=262144)
-        s.add_argument("--kv-bits", type=int, default=4, choices=sorted(KV_BYTES_PER_TOKEN))
+        s.add_argument("--kv-bits", type=int, default=4, choices=KV_BITS)
         s.add_argument("--chunk", type=int)
     s = sub.add_parser("baseline", help="starting configuration for a card and an amount of RAM")
     s.add_argument("--vram-gb", type=float, required=True, help="the card's VRAM, GB as sold (e.g. 24)")

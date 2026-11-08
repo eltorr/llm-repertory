@@ -1,7 +1,9 @@
 # Engines and models
 
 What runs where today, and what it takes to add more. The catalog ([catalog/](../catalog)) lists what Repertory
-offers; an entry is only offered once it has passed curation (compatibility and regression checks).
+offers, and setup, the dashboard, the API's model name and sizing read it. An entry is only offered once it has
+passed curation: a compatibility check and a regression check on the GPU (`repertory curate`, see
+[the catalog](catalog.md)).
 
 ## Qwen and GLM
 
@@ -9,10 +11,11 @@ offers; an entry is only offered once it has passed curation (compatibility and 
   Qwen3.8-Flash-Next and kept GLM working: the engine's size limits cover both models (512 or 288 experts per layer,
   top-10 or top-8), and GLM's chat and tool-call handling is still there.
 - **GLM's side is untested here**: this PC has no GLM model to run it with.
-- **Repertory offers only Qwen today**: the catalog, sizing, setup and the model server all target it. Adding GLM
-  means:
-  - a catalog entry;
-  - sizing for its shape (288 experts, top-8);
+- **Repertory offers only Qwen today**: the catalog has its two quants, and the model server only Qwen's chat
+  format. Setup, the dashboard and sizing take their models from the catalog; what is still written for Qwen is
+  listed in [the catalog](catalog.md#an-entry). Adding GLM means:
+  - its architecture in the engine's `supports`, and a catalog entry;
+  - sizing for its shape (288 experts, top-8): its facts, and the constants still sized for Qwen's top-10;
   - its chat format in the model server;
   - downloading it and packing its expert store;
   - the curation checks and a GPU run.

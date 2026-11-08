@@ -318,7 +318,7 @@ async function copyText(text, btn) {
 }
 const API = "/_switcher/api/";
 const gb = (b) => (b / 1e9).toFixed(1);
-let S = null, CFG = null, DEF = null, tab = "activity", setupSeq = 0;
+let S = null, CFG = null, DEF = null, MODELS = null, tab = "activity", setupSeq = 0;
 
 async function api(path, body) {
   const r = await fetch(API + path, body === undefined ? {} :
@@ -372,7 +372,7 @@ function renderStatus() {
   $("stateIcon").className = "icon " + cls; $("stateIcon").textContent = ic;
   $("stateText").textContent = label + (S.state === "starting" || S.state === "running" ? " · " + (S.tier || "") : "");
   if (S.state === "running") $("stateText").textContent = label;
-  const q = S.quants[S.quant] ? S.quants[S.quant].label : S.quant;
+  const Q = S.quants[S.quant], q = Q ? esc(Q.label) + (curationNote(Q.curation) ? ` <span class="muted">(${esc(curationNote(Q.curation))})</span>` : "") : esc(S.quant);
   let meta = `<b>${q}</b> · ${Math.round(S.context / 1024)}K context`;
   if (S.state === "running" && S.manual_lean && S.tier === "lean") meta += " · chosen by hand: stays lean until you start full";
   if (S.state === "running") meta += ` · ${sub}${S.budget_gb ? ` · <b>${S.budget_gb} GB</b> VRAM budget` : ""}${S.ram_cache_gib != null ? ` · ${S.ram_cache_gib} GiB RAM cache` : ""} · up ${dur(S.now - S.since)}${S.adopted ? " · kept across a manager restart" : S.startup_s ? ` · started in ${dur(S.startup_s)}` : ""}`;
@@ -523,7 +523,8 @@ function hideTip() { $("tip").style.display = "none"; }
 // ---- settings form
 const FIELDS = [
   ["Model", [
-    ["quant", "Model version", "select", [["3.05", "3.05 bpw: fastest"], ["4.05", "4.05 bpw: higher fidelity (more RAM)"]], "Changing this restarts the model."],
+    ["quant", "Model version", "select", () => modelChoices(), "Changing this restarts the model. The catalog's models that passed curation; untested ones have not been checked on a GPU yet."],
+    ["offer_uncurated", "Also offer models that haven't passed curation", "check", null, "Models that failed a curation check, or haven't had every check yet, show up here and in Setup."],
     ["context", "Context window", "select", [[16384, "16K"], [32768, "32K"], [65536, "64K"], [98304, "96K"], [131072, "128K"], [196608, "192K"], [262144, "256K (max)"]], "Keep your client's context setting the same. Smaller windows leave more VRAM for the expert cache (matters on 12-16 GB cards)."],
   ]],
   ["When other apps need resources", [
@@ -554,9 +555,16 @@ const FIELDS = [
     ["auto_recover", "Restart the model automatically if it crashes", "check", null, "After an out-of-memory crash the next start uses a smaller budget."],
   ]],
 ];
+// the model versions the service offers (from the catalog), with their curation state
+const CURATION = { curated: "", untested: "untested", failed: "failed curation" };
+function curationNote(st) { return CURATION[st] === undefined ? st : CURATION[st]; }
+function modelChoices() {
+  return (MODELS || []).map((m) => [esc(m.quant), esc(m.label + (curationNote(m.curation) ? " · " + curationNote(m.curation) : ""))]);
+}
 function renderForm() {
   $("form").innerHTML = FIELDS.map(([title, fs]) => `<fieldset><legend>${title}</legend>` + fs.map(([k, label, type, opts, help]) => {
     const v = CFG[k]; let input;
+    if (typeof opts === "function") opts = opts();
     if (type === "select") input = `<select data-k="${k}">${opts.map(([ov, ol]) => `<option value="${ov}" ${String(ov) === String(v) ? "selected" : ""}>${ol}</option>`).join("")}</select>`;
     else if (type === "check") input = `<input type="checkbox" data-k="${k}" ${v ? "checked" : ""}>`;
     else if (type === "textarea") input = `<textarea data-k="${k}">${esc((v || []).join("\n"))}</textarea>`;
@@ -608,7 +616,7 @@ async function saveSettings() {
   $("saveMsg").textContent = r.message || (r.ok ? "saved" : "error");
   await loadConfig();
 }
-async function loadConfig() { const r = await api("config"); CFG = r.config; DEF = r.defaults; renderForm(); }
+async function loadConfig() { const r = await api("config"); CFG = r.config; DEF = r.defaults; MODELS = r.models; renderForm(); }
 
 // ---- setup
 const SETUP_ST = { ok: ["good", "✓", "Done"], missing: ["neutral", "○", "Not done"], running: ["accent", "↻", "Running"],
@@ -619,8 +627,9 @@ async function pollSetup() {
   $("steps").innerHTML = r.steps.map((s) => {
     const [c, i, l] = SETUP_ST[s.status] || SETUP_ST.unknown;
     const verb = s.status === "ok" ? "Run again" : s.status === "outdated" ? "Update" : "Run";
+    const cur = s.model && curationNote(s.curation) ? ` · <span class="muted">${esc(curationNote(s.curation))}</span>` : "";
     return `<div class="step"><div class="st"><span class="icon ${c}">${i}</span>${l}</div>` +
-      `<div><div class="title">${esc(s.title)}</div><div class="desc">${esc(s.desc)}</div></div>` +
+      `<div><div class="title">${esc(s.title)}${cur}</div><div class="desc">${esc(s.desc)}</div></div>` +
       `<button data-step="${s.id}" ${r.running ? "disabled" : ""}>${verb}</button></div>`;
   }).join("");
   document.querySelectorAll("[data-step]").forEach((b) => b.onclick = async () => {

@@ -11,6 +11,9 @@
   ],
   "additionalProperties": false,
   "properties": {
+    "$schema": {
+      "type": "string"
+    },
     "schema_version": {
       "const": 1
     },
@@ -157,6 +160,7 @@
         "name",
         "license",
         "source",
+        "supports",
         "requires",
         "build",
         "serve",
@@ -172,6 +176,36 @@
         },
         "license": {
           "$ref": "#/$defs/license"
+        },
+        "supports": {
+          "description": "What models the engine runs: a model's config.json must name one of these architectures, and its format must be one of these. Curation checks both.",
+          "type": "object",
+          "required": [
+            "architectures",
+            "formats"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "architectures": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              },
+              "description": "config.json architectures, e.g. Qwen4ExpForConditionalGeneration"
+            },
+            "formats": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "enum": [
+                  "exl3",
+                  "gguf",
+                  "safetensors"
+                ]
+              }
+            }
+          }
         },
         "source": {
           "description": "Where the engine comes from: a git repo at a pinned commit, or this repository itself (self), with its adapter in subdir.",
@@ -381,6 +415,7 @@
       "required": [
         "id",
         "family",
+        "quant",
         "label",
         "source",
         "format",
@@ -398,7 +433,13 @@
           "$ref": "#/$defs/id"
         },
         "family": {
-          "type": "string"
+          "type": "string",
+          "description": "The model's name for clients (what /v1/models lists)"
+        },
+        "quant": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$",
+          "description": "Its short name in the manager: the quant setting, bench run specs, run.sh's QUANT and sizing's key. Its setup step is m plus this without dots (m305)."
         },
         "label": {
           "type": "string"
@@ -577,6 +618,165 @@
             "validated"
           ],
           "description": "Whether the engine's CPU lane can compute this quant's experts: 'none' when no kernel decodes its format, 'experimental' when one exists but is not gated or validated for it"
+        },
+        "offer_untested": {
+          "type": "boolean",
+          "default": false,
+          "description": "Offered while its curation is untested (not run yet, or not every check passed yet), shown as untested: for the entries from before curation existed. Only curated entries are offered otherwise; a failed one never is, unless the offer_uncurated setting is on."
+        },
+        "curation": {
+          "$ref": "#/$defs/curation"
+        }
+      }
+    },
+    "curation": {
+      "description": "The last curation run (python -m repertory curate MODEL): curated when the compatibility and regression checks both passed, failed when one failed, untested otherwise (one not run yet, or a reference only recorded). An entry without it predates curation.",
+      "type": "object",
+      "required": [
+        "status",
+        "date",
+        "checks"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "curated",
+            "failed",
+            "untested"
+          ]
+        },
+        "date": {
+          "type": "string",
+          "format": "date"
+        },
+        "machine": {
+          "$ref": "#/$defs/machine"
+        },
+        "engine_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "checks": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "compat": {
+              "$ref": "#/$defs/check"
+            },
+            "regression": {
+              "$ref": "#/$defs/check"
+            }
+          }
+        }
+      }
+    },
+    "machine": {
+      "description": "What a check ran on: no host names",
+      "type": "object",
+      "required": [
+        "gpu",
+        "vram_gb",
+        "ram_gb",
+        "platform"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "gpu": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vram_gb": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ram_gb": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "platform": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        }
+      }
+    },
+    "check": {
+      "description": "One check's outcome: ok true (passed), false (failed) or null (not decided: skipped, or a reference only recorded); each item is one thing checked.",
+      "type": "object",
+      "required": [
+        "ok",
+        "date",
+        "items"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "ok": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "date": {
+          "type": "string",
+          "format": "date"
+        },
+        "engine_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "machine": {
+          "$ref": "#/$defs/machine"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "ok"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "ok": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "detail": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "numbers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "number",
+              "string",
+              "boolean",
+              "null"
+            ]
+          }
         }
       }
     }

@@ -3,6 +3,7 @@
 Windows + WSL2: WSL itself, its memory limit, the Ubuntu distro, then the shared Linux steps run inside the distro.
 Native Linux:   the NVIDIA driver (checked; installing one needs a reboot), then the same shared steps.
 The Linux steps are the scripts in setup/ (10_base, 20_env, 30_build, 50_model); every step can be re-run safely.
+The model steps come from the catalog: one per model the engine runs, with its label, sizes, paths and pin.
 """
 import asyncio
 import collections
@@ -13,15 +14,19 @@ from pathlib import Path
 
 import psutil
 
-from . import hardware
+from . import catalog, hardware
 from .config import GB, IS_WINDOWS, POWERSHELL_EXE, REPO, SYSTEM32, WSL_EXE, log
+
+from engines.exl3_offload import sizing  # noqa: E402
 
 CUDA = hardware.engine_cuda()
 DRIVER = hardware.lib_value("DRIVER_MIN")
 
 W = "windows-wsl"
 L = "linux"
-STEPS = [
+# The engine's steps. They are this engine's (exl3-offload, the only one the manager runs today), so they stay
+# written out here rather than read from the catalog's build steps.
+BASE_STEPS = [
     {"id": "wsl", "title": "WSL 2", "platforms": [W], "blocks": True,
      "desc": "Installs or updates the Windows Subsystem for Linux. Windows asks for administrator approval; a first "
              "install usually needs a restart."},
@@ -41,18 +46,42 @@ STEPS = [
              f"checkout's commit) and creates its Python environment with PyTorch (CUDA {CUDA})."},
     {"id": "build", "title": "Compile GPU kernels", "platforms": [W, L], "blocks": True, "script": "30_build.sh",
      "desc": "Builds exllamav3 and the offload kernels for this GPU's architecture. Re-run after changing GPUs."},
-    {"id": "m305", "title": "Model: 3.05 bpw (fastest)", "platforms": [W, L], "blocks": False,
-     "script": "50_model.sh", "args": ["3.05"], "desc": "~85 GB download + ~47 GB expert store. Resumable."},
-    {"id": "m405", "title": "Model: 4.05 bpw (higher fidelity)", "platforms": [W, L], "blocks": False,
-     "script": "50_model.sh", "args": ["4.05"], "desc": "~107 GB download + ~62 GB expert store. Resumable."},
 ]
+
+
+def model_steps(cat=None):
+    """One step per catalog model the engine runs: setup/50_model.sh downloads it at its pinned revision (checking
+    every file) and packs its expert store. The step id (m305) is also the key setup/check.sh reports it under."""
+    out = []
+    for m in (cat or catalog.load()).models_for(sizing.ENGINE):
+        src, paths, disk = m["source"], m["paths"], m["disk"]
+        args = [m["quant"], "--dir", paths["model_dir"], "--store", paths["store"], "--repo", src["huggingface"],
+                "--revision", src["revision"]] + (["--branch", src["branch"]] if src.get("branch") else [])
+        out.append({"id": catalog.setup_id(m), "title": f"Model: {m['label']}", "platforms": [W, L], "blocks": False,
+                    "script": "50_model.sh", "args": args,
+                    # prepared_gb is this engine's expert store
+                    "desc": f"~{disk['download_gb']:g} GB download + ~{disk['prepared_gb']:g} GB expert store. "
+                            "Resumable.",
+                    "model": m["id"], "quant": m["quant"], "curation": catalog.status(m),
+                    "offered": catalog.offered(m)})
+    return out
+
+
+def all_steps():
+    return BASE_STEPS + model_steps()
+
+
+def model_specs(cat=None):
+    """setup/check.sh's arguments for the models: KEY=MODEL_DIR:STORE, e.g. m305=model:store/qwen.bin."""
+    return [f"{catalog.setup_id(m)}={m['paths']['model_dir']}:{m['paths']['store']}"
+            for m in (cat or catalog.load()).models_for(sizing.ENGINE)]
 
 
 class Setup:
     def __init__(self, svc):
         self.svc = svc
         self.host = svc.host
-        self.steps = [s for s in STEPS if self.host.kind in s["platforms"]]
+        self.status = {}
         self.status = {s["id"]: "unknown" for s in self.steps}
         self.hw = None
         self.out = collections.deque(maxlen=5000)
@@ -65,11 +94,29 @@ class Setup:
         self.out.append((self.seq, line.rstrip("\r\n")))
 
     @property
+    def steps(self):
+        """This platform's steps, as setup shows them: a model's only when it is on offer (catalog.offered: curated,
+        or untested with offer_untested), or the offer_uncurated setting is on, or it is installed, running or the
+        chosen model already."""
+        cfg = getattr(self.svc, "cfg", None) or {}
+        out = []
+        for s in all_steps():
+            if self.host.kind not in s["platforms"]:
+                continue
+            if "model" in s and not (s["offered"] or cfg.get("offer_uncurated") or s["quant"] == cfg.get("quant")
+                                     or self.status.get(s["id"]) in ("ok", "running")):
+                continue
+            out.append(s)
+        return out
+
+    @property
     def blocking(self):
-        return self.running is not None and next(s for s in self.steps if s["id"] == self.running)["blocks"]
+        step = self.step(self.running) if self.running is not None else None
+        return bool(step and step["blocks"])
 
     def step(self, sid):
-        return next((s for s in self.steps if s["id"] == sid), None)
+        """A step by id, shown or not: `repertory setup STEP` can run a model step that isn't on offer."""
+        return next((s for s in all_steps() if s["id"] == sid and self.host.kind in s["platforms"]), None)
 
     async def check(self):
         # one at a time, and a reading from now: one already running may have started before a step finished
@@ -100,8 +147,9 @@ class Setup:
             st["distro"] = "ok" if w["distro_present"] and w["distro_wsl_version"] == 2 else "missing"
         else:
             st["driver"] = "missing" if not hw["gpus"] else "outdated" if hardware.driver_too_old(hw) else "ok"
+        models = [s["id"] for s in model_steps()]
         if not e or "error" in e:
-            for sid in ("base", "engine", "build", "m305", "m405"):
+            for sid in ("base", "engine", "build", *models):
                 st[sid] = "missing" if (IS_WINDOWS and st.get("distro") == "missing") else "unknown"
             return st
         st["base"] = "ok" if e.get("cuda") == "1" and e.get("driver") == "1" else "missing"
@@ -115,8 +163,8 @@ class Setup:
             st["engine"] = "ok"
         # built, but from older kernel sources than the engine checkout's (an update changed them): compile again
         st["build"] = ("missing" if e.get("build") != "1" else "outdated" if e.get("build_src") == "0" else "ok")
-        st["m305"] = "ok" if e.get("m305") == "1" else "missing"
-        st["m405"] = "ok" if e.get("m405") == "1" else "missing"
+        for sid in models:
+            st[sid] = "ok" if e.get(sid) == "1" else "missing"
         return st
 
     async def run(self, sid):

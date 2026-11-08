@@ -85,12 +85,16 @@ engine's code changed.
 | Model server | [engines/exl3_offload/](engines/exl3_offload) | Runs the model behind the manager: Qwen's chat format and tool calls, memory guards, sizing, verified downloads |
 | ExLlamaV3 | [exllamav3/](exllamav3) | turboderp's inference library: the model code and the EXL3 quantized kernels |
 | Offload engine | [glm53-flash-offload/](glm53-flash-offload) | sybil-solutions' expert tiers: the hottest experts in VRAM, more in RAM, the rest read from NVMe; the OpenAI APIs on one pipeline |
-| Catalog | [catalog/](catalog) | The curated models and engines, each pinned to one upload, with how to build, prepare and serve them |
+| Catalog | [catalog/](catalog) | The models and engines, each pinned to one upload, with how to build, prepare and serve them; setup, the dashboard and sizing read it |
 | Setup | [setup/](setup) | The install steps for WSL2 and Linux |
 
 On Windows the engine runs inside WSL2, and the manager runs on Windows and starts it there. ExLlamaV3 supports
 many more models; the offload engine runs Qwen3.8-Flash-Next and GLM-5.3-Flash. See
 [engines and models](docs/engines.md).
+
+A catalog entry is offered once it passes curation (`repertory curate`): a compatibility check that needs no GPU,
+and a regression check on the GPU that must reproduce its recorded answers exactly at the recorded speed. See
+[the catalog](docs/catalog.md).
 
 ## The dashboard
 

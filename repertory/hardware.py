@@ -14,6 +14,7 @@ from pathlib import Path
 import psutil
 
 
+from . import catalog
 from .config import GB, GIB, IS_WINDOWS, REPO, WSL_EXE
 
 from engines.exl3_offload import sizing  # noqa: E402  (the engine adapter's, shared with its run.sh)
@@ -180,16 +181,22 @@ def repo_state():
 
 
 def engine_check(host):
-    """setup/check.sh in the engine's environment (WSL or here)."""
+    """setup/check.sh in the engine's environment (WSL or here), for the catalog's models."""
+    from .setup import model_specs
     script = host.to_engine_path(REPO / "setup" / "check.sh")
     try:
-        r = host.run("bash", script, host.engine_dir, timeout=60)
+        r = host.run("bash", script, host.engine_dir, *model_specs(), timeout=60)
     except (OSError, subprocess.TimeoutExpired) as e:
         return {"error": str(e)}
     vals = parse_kv(r.stdout or "")
     if "driver" not in vals:
         vals["error"] = ((r.stderr or "") + (r.stdout or "")).strip()[-300:] or f"exit {r.returncode}"
     return vals
+
+
+def installed(engine):
+    """Which of the catalog's models setup/check.sh found downloaded and packed, by quant: {"3.05": True, ...}."""
+    return {m["quant"]: engine.get(catalog.setup_id(m)) == "1" for m in catalog.load().models_for(sizing.ENGINE)}
 
 
 def detect(host, cfg, with_engine=True):
@@ -314,13 +321,15 @@ def recommend(hw, cfg):
     kind = hw["host"].get("kind", "linux")
     ram_total = hw["ram"]["total_gb"] * GB
     e = hw.get("engine") or {}
-    have = {"3.05": e.get("m305") == "1", "4.05": e.get("m405") == "1"} if e.get("driver") else None
+    have = installed(e) if e.get("driver") else None
     base = machine_baseline(g, ram_total, kind)
     level, title, detail, settings = baseline_item(base, cfg, have)
     add(level, title, detail, settings)
     out[-1]["apply_label"] = "Apply baseline"
     ctx_any = sizing.max_context(quant, budget, staging=False)
     ctx_fast = sizing.max_context(quant, budget)
+    # 3.05 is the smaller of Qwen's two quants: named here as in the preset rule (sizing.baseline), until another
+    # family needs its own
     if sizing.max_context("3.05", budget, staging=False) == 0:
         pass                                    # the baseline item says why
     elif ctx_any == 0:
@@ -386,7 +395,7 @@ def recommend(hw, cfg):
         add("warn", f"Engine is on a '{e['fs']}' filesystem", "The expert store needs O_DIRECT reads (ext4 or xfs).")
     if e.get("disk_free_gb"):
         q = sizing.QUANTS[quant]
-        need = 0 if e.get("m305" if quant == "3.05" else "m405") == "1" else q["download_gb"] + q["store_gb"]
+        need = 0 if installed(e).get(quant) else q["download_gb"] + q["store_gb"]
         if need and int(e["disk_free_gb"]) < need:
             add("error", f"Not enough disk space for {quant} bpw", f"Needs ~{need} GB, {e['disk_free_gb']} GB free.")
     return out

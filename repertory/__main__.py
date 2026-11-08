@@ -7,6 +7,7 @@
   python -m repertory setup [STEP]                             list setup steps, or run one in this terminal
   python -m repertory plan [--budget-gb N]                     VRAM/RAM plan for this GPU (sizing.py)
   python -m repertory bench [RUNS] [--workload quick]          benchmark this machine (takes the GPU while it runs)
+  python -m repertory curate [MODEL] [--checks ...] [--record]  check a catalog entry before it's offered
 """
 import argparse
 import asyncio
@@ -140,9 +141,9 @@ def cmd_detect(cfg, a):
     if e:
         built = ", built for " + e["build_arch"] if e.get("build_arch") else ""
         ready = "ready" if e.get("engine") == "1" else "not set up"
+        models = ", ".join(f"{q} {'yes' if ok else 'no'}" for q, ok in hardware.installed(e).items())
         print(f"engine   {ready} at {cfg['repo_dir'] or 'this checkout'}; "
-              f"CUDA {e.get('cuda_version')}, torch {e.get('torch')}{built}; "
-              f"models: 3.05 {'yes' if e.get('m305') == '1' else 'no'}, 4.05 {'yes' if e.get('m405') == '1' else 'no'}")
+              f"CUDA {e.get('cuda_version')}, torch {e.get('torch')}{built}; models: {models}")
     print("recommendations:")
     print_recommendations(hw["recommendations"])
     return 0
@@ -219,8 +220,8 @@ def first_run_baseline(cfg):
         def present(q):
             root = Path(cfg["repo_dir"] or h.engine_dir)
             return (root / sizing.QUANTS[q]["model_dir"]).is_dir() and (root / sizing.QUANTS[q]["store"]).is_file()
-        other = "3.05" if settings["quant"] == "4.05" else "4.05"
-        if not present(settings["quant"]) and present(other):
+        others = [q for q in sizing.QUANTS if q != settings["quant"]]
+        if not present(settings["quant"]) and any(present(q) for q in others):
             settings.pop("quant")
             settings.pop("context")
     cfg.update(settings)
@@ -301,14 +302,27 @@ def cmd_bench(cfg, a):
         return 2
     runs = a.runs or ["current"]
     base = service_url(cfg) + "api/"
-    try:
-        http_get_json(base + "status", 3, auth(cfg))
-    except Exception:  # noqa: BLE001 - not running: benchmark here
+    if not service_running(cfg):
         return bench_here(cfg, a, runs)
-    r = post_json(base + "bench", {"runs": runs, "workload": a.workload, "resume": a.resume}, auth(cfg))
+    records = bench_via_service(cfg, base, {"runs": runs, "workload": a.workload, "resume": a.resume})
+    return 2 if records is None else bench_results(records, a)
+
+
+def service_running(cfg):
+    try:
+        http_get_json(service_url(cfg) + "api/status", 3, auth(cfg))
+        return True
+    except Exception:  # noqa: BLE001 - not running
+        return False
+
+
+def bench_via_service(cfg, base, body):
+    """A benchmark in the running service, as the dashboard starts one, its output followed here: its records, or
+    None if the service refused it. Ctrl+C cancels it."""
+    r = post_json(base + "bench", body, auth(cfg))
     print(r.get("message"))
     if not r.get("ok"):
-        return 2
+        return None
     seq, cancelled = 0, False
     while True:
         try:
@@ -325,13 +339,24 @@ def cmd_bench(cfg, a):
             cancelled = True
             print("cancelling the benchmark (Ctrl+C again stops watching)")
             post_json(base + "bench/cancel", {}, auth(cfg))
-    return bench_results(r["records"], a)
+    return r["records"]
 
 
 def bench_here(cfg, a, runs):
     """No service: run the benchmark in this process. A model server left running is stopped, and stays stopped."""
-    from .service import Service
     print("The Repertory service isn't running, so the benchmark runs in this terminal.")
+    try:
+        records = bench_in_process(cfg, runs, a.workload, a.resume)
+    except KeyboardInterrupt:
+        print("stopped")
+        return 1
+    return 2 if records is None else bench_results(records, a)
+
+
+def bench_in_process(cfg, runs, workload, resume=False):
+    """The benchmark in this process (the service isn't running): its records, or None if it was refused. A model
+    server left running is stopped, and stays stopped; Ctrl+C stops the benchmark's server too."""
+    from .service import Service
     svc = Service(cfg)
     svc.mon.start()
     svc.host.start_follower()
@@ -343,19 +368,31 @@ def bench_here(cfg, a, runs):
             if svc.mon.get():
                 break
             await asyncio.sleep(0.25)
-        ok, msg = svc.bench.start(runs, a.workload, resume=a.resume)
+        ok, msg = svc.bench.start(runs, workload, resume=resume)
         if not ok:
             print(msg)
             return None
         await svc.bench.task
         return svc.bench.records
     try:
-        records = asyncio.run(go())
+        return asyncio.run(go())
     except KeyboardInterrupt:
         svc.host.backend_stop()
-        print("stopped")
-        return 1
-    return 2 if records is None else bench_results(records, a)
+        raise
+
+
+def bench_records(cfg, runs, workload):
+    """Run a benchmark and return its records: through the running service when there is one (it sets the model
+    aside and brings it back), else in this process. Curation's regression check runs this way."""
+    if service_running(cfg):
+        return bench_via_service(cfg, service_url(cfg) + "api/", {"runs": runs, "workload": workload})
+    print("The Repertory service isn't running, so the benchmark runs in this terminal (the model stays stopped).")
+    return bench_in_process(cfg, runs, workload)
+
+
+def cmd_curate(cfg, a):
+    from . import curate
+    return curate.main(cfg, a, bench_records)
 
 
 def bench_results(records, a):
@@ -405,6 +442,14 @@ def main(argv=None):
     b.add_argument("--table", metavar="FOLDER", help="print the report tables of a results folder")
     b.add_argument("--sizing", metavar="FOLDER", help="print sizing.MEASURED rows for a results folder")
     b.add_argument("--list", action="store_true", help="list the presets and earlier results")
+    c = sub.add_parser("curate", help="check that a catalog entry works here before it's offered (docs/catalog.md)")
+    c.add_argument("model", nargs="?", help="a model id or quant; none lists the catalog's models")
+    c.add_argument("--checks", choices=("compat", "regression", "all"), default="all",
+                   help="compat: no GPU; regression: takes the GPU through the benchmark; all (default)")
+    c.add_argument("--record", action="store_true",
+                   help="record a new regression reference from this run (none yet, or to accept a change)")
+    c.add_argument("--no-write", action="store_true", help="print the result without writing it into the catalog")
+    c.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     cfg = config.load_config()
     if not config.CONFIG_PATH.exists():
@@ -412,7 +457,7 @@ def main(argv=None):
         config.save_config(cfg)
     config.ensure_token(cfg)
     handler = {None: cmd_serve, "serve": cmd_serve, "open": cmd_open, "status": cmd_status, "detect": cmd_detect,
-               "setup": cmd_setup, "plan": cmd_plan, "bench": cmd_bench}[a.cmd]
+               "setup": cmd_setup, "plan": cmd_plan, "bench": cmd_bench, "curate": cmd_curate}[a.cmd]
     return handler(cfg, a)
 
 
