@@ -278,12 +278,16 @@ def model_config(model, files, hub):
     """config.json from the downloaded folder, else from Hugging Face at the pinned revision: (config, where)."""
     text = files.read(f"{model['paths']['model_dir']}/config.json")
     if text is not None:
-        return json.loads(text), "the downloaded folder"
-    src = model["source"]
-    data = hub.file(src["huggingface"], src["revision"], "config.json")
-    if data is None:
-        raise ValueError("the pinned revision has no config.json")
-    return json.loads(data), "Hugging Face at the pinned revision"
+        cfg, where = json.loads(text), "the downloaded folder"
+    else:
+        src = model["source"]
+        data = hub.file(src["huggingface"], src["revision"], "config.json")
+        if data is None:
+            raise ValueError("the pinned revision has no config.json")
+        cfg, where = json.loads(data), "Hugging Face at the pinned revision"
+    if not isinstance(cfg, dict):
+        raise ValueError(f"config.json from {where} is not a JSON object")
+    return cfg, where
 
 
 def architecture_item(model, engine, files, hub):
@@ -516,6 +520,8 @@ def regression(model, runner, record=False, folder=None):
         return out
     items, numbers = compare(ref, rec)
     numbers.update({k: v for k, v in run.items() if k != "label"})
+    # a whole-card run's VRAM cache follows what the desktop holds at the time: the reference's, to compare
+    numbers["vram_experts_ref"] = (ref.get("run") or {}).get("vram_experts")
     out.update(items=items, numbers=numbers, ok=outcome(items))
     bad = [i["name"] for i in items if i["ok"] is False]
     if out["ok"]:
@@ -542,11 +548,12 @@ def curation(model, results):
     """The entry's new curation record: this run's checks over the ones it didn't run."""
     checks = dict((model.get("curation") or {}).get("checks") or {})
     checks.update(results)
-    latest = results.get("regression") or results.get("compat") or {}
+    ran = [r for r in (results.get("regression"), results.get("compat")) if r]     # the regression's first
     rec = {"status": status_of(checks), "date": today()}
-    if latest.get("machine"):
-        rec["machine"] = latest["machine"]
-    rec["engine_commit"] = latest.get("engine_commit")
+    machine = next((r["machine"] for r in ran if r.get("machine")), None)
+    if machine:
+        rec["machine"] = machine
+    rec["engine_commit"] = next((r["engine_commit"] for r in ran if r.get("engine_commit")), None)
     rec["checks"] = {k: checks[k] for k in CHECKS if k in checks}
     return rec
 
