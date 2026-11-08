@@ -84,6 +84,7 @@ New in this repository:
 | variable | default | |
 |---|---|---|
 | `GLM53_MAX_BATCH` | `1` | sequences the cache keeps recurrent state for (exllamav3 `-ambs`): the most the generator may run at once |
+| `GLM53_NV_DROP_DIRS` | none | folders (`:`-separated) whose `*.so`, `*.py` and `*.pyc` files leave the page cache with the checkpoint's shards, once the model is loaded and before the RAM tier is allocated. `run.sh` sets it to the folders it pre-reads on WSL |
 
 ## What it does not do
 

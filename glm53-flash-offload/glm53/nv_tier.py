@@ -24,6 +24,7 @@ Env: GLM53_NV_STORE (store .bin), GLM53_NV_RAM_GB (RAM tier; default auto = memo
 import bisect, collections, concurrent.futures as cf, ctypes, json, mmap, os, re, threading, time
 import numpy as np
 import torch
+import pagecache
 
 _SRC = r"""
 #include <torch/extension.h>
@@ -480,7 +481,7 @@ def install():
         if a is None or key != a[0]:
             fn = self.tensor_file_map.get(key) if hasattr(self, "tensor_file_map") else None
             if fn:
-                _LOAD["files"].add(os.path.join(self.directory, fn) if not os.path.isabs(fn) else fn)
+                _LOAD["files"].add(os.path.abspath(fn))      # a path as globbed, relative to the cwd
             return orig_get(self, key, device, *args, **kwargs)
         dev_idx, off, sz = a[1]
         meta = self.find_stc(key).get_tensor_meta(key)[key]
@@ -837,19 +838,21 @@ class BCProxy:
 
 
 def _drop_checkpoint_cache():
-    nd = 0
-    for f in sorted(_LOAD["files"]):
-        try:
-            fd = os.open(f, os.O_RDONLY); os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED); os.close(fd); nd += 1
-        except OSError:
-            pass
-    return nd
+    """DONTNEED on the checkpoint shards the loader read and on the launcher's library pre-read (the files under
+    GLM53_NV_DROP_DIRS, os.pathsep-separated), so that neither is still page cache when the RAM tier is allocated
+    (pagecache.py). Returns what it did, for the log."""
+    dirs = [d for d in os.environ.get("GLM53_NV_DROP_DIRS", "").split(os.pathsep) if d]
+    before = pagecache.file_cache_bytes()
+    nd = pagecache.drop(_LOAD["files"])
+    nl = pagecache.drop(pagecache.preread_files(dirs))
+    after = pagecache.file_cache_bytes()
+    freed = "" if before is None or after is None else f", page cache {before / 1e9:.1f} -> {after / 1e9:.1f} GB"
+    return f"DONTNEED on {nd} checkpoint and {nl} library files{freed}"
 
 
 def attach_pool(pool):
     global NV
-    nd = _drop_checkpoint_cache()
-    _log(f"model loaded + VRAM pool built; DONTNEED on {nd} checkpoint files")
+    _log(f"model loaded + VRAM pool built; {_drop_checkpoint_cache()}")
     NV = NvTier(pool)
     return NV
 
@@ -860,9 +863,9 @@ def finish(model):
     for li, m in enumerate(nv.pool.mods):
         assert m.bc is not None and m.support_quant_paths, m.key
         m.bc = BCProxy(m.bc, li, nv)
-    nd = _drop_checkpoint_cache()
+    dropped = _drop_checkpoint_cache()
     _log(f"ready: {_LOAD['marked_linears']} expert linears on the bounce slot, {_LOAD['skipped_bytes'] / 1e9:.1f} GB of "
-         f"checkpoint expert bytes never read, DONTNEED on {nd} shard files")
+         f"checkpoint expert bytes never read, {dropped}")
     if os.environ.get("GLM53_NV_VERIFY_START", "1") == "1":
         print(f" -- nv_tier startup verify: {nv.verify(32)}", flush=True)
 

@@ -108,6 +108,9 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
   find .venv/lib exllamav3 glm53-flash-offload engines -type f \( -name '*.py' -o -name '*.pyc' \) -print0 2>/dev/null \
     | xargs -0 -r -P16 -n200 cat > /dev/null
   echo "[run.sh] pre-read engine libraries in $(( ($(date +%s%N) - t0) / 1000000 )) ms"
+  # ~5 GB of page cache that Windows counts as used: the engine drops it (all but the pages in use) once the model
+  # is loaded and before it allocates the RAM cache, so that it doesn't add to the load's peak (glm53/pagecache.py)
+  export GLM53_NV_DROP_DIRS="$PWD/.venv/lib:$PWD/exllamav3:$PWD/glm53-flash-offload:$PWD/engines"
 fi
 
 case "$MODE" in

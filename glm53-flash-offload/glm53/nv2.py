@@ -725,8 +725,7 @@ class Nv2:
 
 def attach_pool(pool):
     global NV
-    nd = NT._drop_checkpoint_cache()
-    NT._log(f"model loaded + VRAM pool built; DONTNEED on {nd} checkpoint files")
+    NT._log(f"model loaded + VRAM pool built; {NT._drop_checkpoint_cache()}")
     NV = Nv2(pool)
     return NV
 
@@ -743,9 +742,9 @@ def finish(model):
     for li, m in enumerate(nv.pool.mods):
         assert m.bc is not None and m.support_quant_paths, m.key
         m.bc = NT.BCProxy(m.bc, li, shim)
-    nd = NT._drop_checkpoint_cache()
+    dropped = NT._drop_checkpoint_cache()
     NT._log(f"nv2 ready: {NT._LOAD['marked_linears']} expert linears on the bounce slot, "
-            f"{NT._LOAD['skipped_bytes'] / 1e9:.1f} GB of checkpoint expert bytes never read, DONTNEED on {nd} files")
+            f"{NT._LOAD['skipped_bytes'] / 1e9:.1f} GB of checkpoint expert bytes never read, {dropped}")
     if os.environ.get("GLM53_NV_VERIFY_START", "1") == "1":
         print(f" -- nv2 startup verify: {nv.verify(32)}", flush=True)
 

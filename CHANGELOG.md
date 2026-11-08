@@ -2,6 +2,15 @@
 
 What changed in Repertory, newest first.
 
+## 2026-11-08: Starting a model leaves the PC its RAM
+
+- **Loading no longer piles page cache on top of the RAM cache.** Under WSL, files a start reads stay in the VM's
+  page cache, which Windows counts as used: the engine libraries the launcher pre-reads (about 5 GB) and the
+  checkpoint's weights other than the experts (about 7 GB for GLM-5.3-Flash 2.05). The engine was meant to drop the
+  weights before allocating the RAM cache, but with a relative model folder (`./model-4.05`) every path it tried was
+  wrong, and the log said `DONTNEED on 0 checkpoint files`. Now it drops the shards and the pre-read libraries (all
+  but the pages in use) right before the RAM cache is allocated, and logs the page cache before and after.
+
 ## 2026-11-08: Benchmark page and the head-to-head
 
 - **A results log and the benchmark page** ([docs/benchmarks.md](docs/benchmarks.md)): `python -m repertory results
