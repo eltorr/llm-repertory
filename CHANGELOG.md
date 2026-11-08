@@ -2,6 +2,13 @@
 
 What changed in Repertory, newest first.
 
+## 2026-11-07: measured
+
+- [Engine features and where a token's time goes](research/feature-ab/REPORT.md): prefetch, MTP drafting and the CPU
+  lane are each slower overall on an RTX 5090 with dual-channel RAM, so they stay off. Of an answer token's ~20 ms,
+  GPU compute is about half and copying RAM-resident experts to VRAM about a fifth: the engine copies at 23.5 GB/s
+  where the link does 52-55 GB/s. Python is about 5%.
+
 ## 2026-11-07: security
 
 The repository is public. Before it went public, every commit was checked for private data, and the code scanning

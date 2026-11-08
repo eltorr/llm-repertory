@@ -1,0 +1,78 @@
+{
+ "workload": "standard",
+ "protocol": "repertory-1",
+ "runs": [
+  {
+   "quant": "4.05",
+   "vram_gb": null,
+   "context": 262144,
+   "nostage": false,
+   "ram": null,
+   "mtp": 0,
+   "cpu": null,
+   "prefetch": false,
+   "label": "4.05-card-256k",
+   "spec": "4.05:card:262144"
+  },
+  {
+   "quant": "4.05",
+   "vram_gb": null,
+   "context": 262144,
+   "nostage": false,
+   "ram": null,
+   "mtp": 0,
+   "cpu": null,
+   "prefetch": true,
+   "label": "4.05-card-256k-prefetch",
+   "spec": "4.05:card:262144:prefetch"
+  },
+  {
+   "quant": "4.05",
+   "vram_gb": null,
+   "context": 262144,
+   "nostage": false,
+   "ram": null,
+   "mtp": 1,
+   "cpu": null,
+   "prefetch": false,
+   "label": "4.05-card-256k-mtp1",
+   "spec": "4.05:card:262144:mtp=1"
+  },
+  {
+   "quant": "4.05",
+   "vram_gb": null,
+   "context": 262144,
+   "nostage": false,
+   "ram": null,
+   "mtp": 2,
+   "cpu": null,
+   "prefetch": false,
+   "label": "4.05-card-256k-mtp2",
+   "spec": "4.05:card:262144:mtp=2"
+  },
+  {
+   "quant": "3.05",
+   "vram_gb": null,
+   "context": 262144,
+   "nostage": false,
+   "ram": null,
+   "mtp": 0,
+   "cpu": null,
+   "prefetch": false,
+   "label": "3.05-card-256k",
+   "spec": "3.05:card:262144"
+  },
+  {
+   "quant": "3.05",
+   "vram_gb": null,
+   "context": 262144,
+   "nostage": false,
+   "ram": null,
+   "mtp": 0,
+   "cpu": "",
+   "prefetch": false,
+   "label": "3.05-card-256k-cpu",
+   "spec": "3.05:card:262144:cpu"
+  }
+ ]
+}
