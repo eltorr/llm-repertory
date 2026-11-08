@@ -49,7 +49,7 @@ class ModelStepTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         steps = {s["id"]: s for s in setup_mod.model_steps()}
-        self.assertEqual(list(steps), ["m305", "m405"])
+        self.assertEqual(list(steps), ["m305", "m405", "mglm305"])
         s = steps["m305"]
         self.assertEqual(s["title"], "Model: 3.05 bpw (fastest)")
         self.assertEqual(s["desc"], "~85 GB download + ~47 GB expert store. Resumable.")
@@ -60,11 +60,23 @@ class ModelStepTests(unittest.TestCase):
         self.assertEqual(steps["m405"]["desc"], "~107 GB download + ~62 GB expert store. Resumable.")
         self.assertEqual(steps["m405"]["args"][1:5], ["--dir", "model-4.05", "--store", "store/qwen405.bin"])
         self.assertEqual((s["model"], s["curation"], s["offered"]), ("qwen3.8-flash-next-exl3-3.05", "untested", True))
+        glm = steps["mglm305"]
+        self.assertEqual((glm["title"], glm["desc"]),
+                         ("Model: GLM-5.3-Flash 3.05 bpw", "~125.3 GB download + ~117.3 GB expert store. Resumable."))
+        self.assertEqual(glm["args"], ["glm-3.05", "--dir", "model-glm-3.05", "--store", "store/glm305.bin", "--repo",
+                                       "turboderp/GLM-5.3-Flash-exl3", "--revision",
+                                       "332ab457b709b7ba30dd9a448be5de03b80a7ac9", "--branch", "3.05bpw"])
+        self.assertEqual((glm["model"], glm["quant"], glm["curation"], glm["offered"]),
+                         ("glm-5.3-flash-exl3-3.05", "glm-3.05", "untested", False))
         self.assertEqual([x["id"] for x in setup_for().steps],
-                         ["driver", "base", "engine", "build", "m305", "m405"])          # Linux
+                         ["driver", "base", "engine", "build", "m305", "m405"])          # Linux; GLM isn't curated
+        self.assertEqual([x["id"] for x in setup_for({"offer_uncurated": True}).steps][-1], "mglm305")
+        self.assertEqual([x["id"] for x in setup_for({"quant": "glm-3.05"}).steps][-1], "mglm305")   # the chosen one
+        self.assertEqual(setup_for().step("mglm305")["args"][0], "glm-3.05")          # runnable by name either way
 
     def test_check_sh_is_told_where_each_model_lives(self):
-        self.assertEqual(setup_mod.model_specs(), ["m305=model:store/qwen.bin", "m405=model-4.05:store/qwen405.bin"])
+        self.assertEqual(setup_mod.model_specs(), ["m305=model:store/qwen.bin", "m405=model-4.05:store/qwen405.bin",
+                                                   "mglm305=model-glm-3.05:store/glm305.bin"])
 
     def test_a_model_that_failed_curation_is_hidden_unless_installed_chosen_or_asked_for(self):
         cat = with_curation(**{"3.05": "curated", "4.05": "failed"})
@@ -88,7 +100,8 @@ class ModelStepTests(unittest.TestCase):
         self.assertEqual((st["m305"], st["m405"]), ("ok", "missing"))
         st = setup_for().statuses({"gpus": [{}], "driver": {}, "engine": {"error": "no WSL"}})
         self.assertEqual((st["m305"], st["m405"]), ("unknown", "unknown"))
-        self.assertEqual(hardware.installed({"m305": "1"}), {"3.05": True, "4.05": False})
+        self.assertEqual(hardware.installed({"m305": "1"}), {"3.05": True, "4.05": False, "glm-3.05": False})
+        self.assertEqual(hardware.installed({"mglm305": "1"})["glm-3.05"], True)
 
     def test_running_a_model_step_passes_the_catalogs_values_and_the_legacy_folder(self):
         ran = []
@@ -139,7 +152,21 @@ class DashboardTests(unittest.TestCase):
             svc.cfg["quant"] = "3.05"
             self.assertEqual([c["quant"] for c in Service.model_choices(svc)], ["3.05", "4.05"])  # it's the chosen one
             svc.cfg.update(quant="4.05", offer_uncurated=True)
-            self.assertEqual([c["offered"] for c in Service.model_choices(svc)], [False, True])
+            self.assertEqual([c["offered"] for c in Service.model_choices(svc)], [False, True, False])
+
+    def test_glm_is_offered_once_curated_and_serves_under_its_own_name(self):
+        svc, Service = self.service(quant="4.05")
+        with mock.patch.object(catalog, "load", with_curation):
+            self.assertNotIn("glm-3.05", [c["quant"] for c in Service.model_choices(svc)])   # untested
+            svc.cfg["quant"] = "glm-3.05"                                                    # the chosen one
+            choices = {c["quant"]: c for c in Service.model_choices(svc)}
+            self.assertEqual((choices["glm-3.05"]["label"], choices["glm-3.05"]["offered"]),
+                             ("GLM-5.3-Flash 3.05 bpw", False))
+            self.assertEqual(Service.models_list(svc)["data"][0]["id"], "glm-5.3-flash")
+        cat = with_curation(**{"glm-3.05": "curated"})
+        with mock.patch.object(catalog, "load", lambda: cat):
+            svc.cfg["quant"] = "3.05"
+            self.assertIn("glm-3.05", [c["quant"] for c in Service.model_choices(svc)])
 
 
 @unittest.skipUnless(POSIX_BASH, "needs a Linux shell")

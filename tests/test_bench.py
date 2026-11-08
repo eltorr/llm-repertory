@@ -341,6 +341,23 @@ class BenchTests(unittest.TestCase):
         for k in ("QWEN_MTP", "QWEN_CPU_LANE", "GLM53_NV_PREFETCH"):
             self.assertNotIn(k, env)                                  # engine features stay off unless named
 
+    def test_a_glm_run_starts_glm_from_its_catalog_entry(self):
+        self.svc.setup.hw["engine"]["mglm305"] = "0"
+        b = self.run_bench(["glm-3.05:card:131072"])
+        self.assertIn("glm-3.05 bpw model isn't downloaded", b.records[0]["error"])        # its own setup step
+        self.assertEqual(self.svc.host.envs, [])
+        self.svc.setup.hw["engine"]["mglm305"] = "1"
+        b = self.run_bench(["glm-3.05:22:65536", "glm-3.05:16:65536:nostage:ram=30"])
+        full, small = self.svc.host.envs
+        self.assertEqual((full["QUANT"], full["MODEL_DIR"], full["STORE"], full["CONTEXT"]),
+                         ("glm-3.05", "./model-glm-3.05", "./store/glm305.bin", "65536"))
+        plan = b.records[0]["plan"]
+        self.assertTrue(plan["ok"] and plan["staging"], plan)
+        self.assertEqual(full["QWEN_CHUNK"], str(plan["chunk"]))
+        # the engine may lend prefill its two staging buffers (5.4 GB) and the chunk's activations
+        self.assertGreater(float(full["GLM53_EC_ELASTIC_GB"]), 6.0)
+        self.assertEqual((small["QWEN_CHUNK"], small["RAM_GB"], small["GLM53_EC_STAGE_GB"]), ("1792", "30", "0"))
+
     def test_engine_features_reach_the_engine(self):
         self.run_bench(["3.05:card:65536:mtp=2:cpu=2-15:prefetch"])
         env = self.svc.host.envs[0]
@@ -573,6 +590,25 @@ class RunSpecTests(unittest.TestCase):
         matrix = bench.expand("matrix", self.cfg)
         self.assertEqual(len(matrix), len(bench.MATRIX))
         self.assertEqual({r["ram"] for r in matrix}, {38})                      # runs differ only in VRAM
+
+    def test_glm_runs(self):
+        r = bench.parse_run("glm-3.05:card:131072")
+        self.assertEqual((r["quant"], r["vram_gb"], r["context"], r["label"], r["spec"]),
+                         ("glm-3.05", None, 131072, "glm-3.05-card-128k", "glm-3.05:card:131072"))
+        r = bench.parse_run("glm-3.05:24:65536:nostage:ram=40")
+        self.assertEqual((r["vram_gb"], r["nostage"], r["ram"], r["label"]),
+                         (24.0, True, 40, "glm-3.05-24gb-64k-nostage-ram40"))
+        # "quants" is the configured model's own: GLM has one, Qwen two
+        glm = dict(self.cfg, quant="glm-3.05", context=131072)
+        self.assertEqual([x["label"] for x in bench.expand(["current", "quants"], glm)],
+                         ["glm-3.05-card-128k", "glm-3.05-card-128k"])
+        self.assertEqual(bench.family_quants("4.05"), ["3.05", "4.05"])
+        with self.assertRaises(ValueError):
+            bench.parse_run("glm-4.05:card:65536")
+        # the matrix stays Qwen's
+        self.assertEqual({x["quant"] for x in bench.expand("matrix", glm)}, {"3.05", "4.05"})
+        self.assertEqual((bench.nostage_chunk("3.05"), bench.nostage_chunk("glm-3.05"), bench.nostage_chunk("x")),
+                         (1536, 1792, 1536))
 
     def test_engine_features(self):
         r = bench.parse_run("3.05:card:262144:ram=26:mtp=2:cpu=2-15:prefetch")

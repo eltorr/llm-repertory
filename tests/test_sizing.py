@@ -145,5 +145,54 @@ class SizingTests(unittest.TestCase):
         self.assertEqual(sizing.CONTEXT_LIMIT, config.MAXIMUM["context"])
 
 
+class GlmSizingTests(unittest.TestCase):
+    """GLM-5.3-Flash: 42 x 288 experts of 9.44 MB, top-8; its staging buffers alone are 5.4 GB."""
+    Q = "glm-3.05"
+
+    def test_its_layout(self):
+        self.assertAlmostEqual(sizing.expert_bytes(self.Q) / GB, 114.15, delta=0.01)   # how-it-works.md: 114.2 GB
+        self.assertEqual(sizing.stage_bytes(self.Q), 2 * 288 * 9_437_184)
+        self.assertEqual(sizing.nostage_chunk(self.Q), 1792)                     # 2,048 tokens x top-8 fill it
+        self.assertEqual(sizing.QUANTS[self.Q]["max_context"], 262144)         # the config's 1M, as far as we run
+
+    def test_a_32_gb_card_at_256k(self):
+        # this PC's whole-card budget: ~29.5 GB
+        p = sizing.plan(self.Q, 29.5 * GB, 262144)
+        self.assertTrue(p["ok"] and p["staging"])
+        self.assertEqual(p["chunk"], 16384)
+        self.assertAlmostEqual(p["fixed"] / GB, 8.65 + 262144 * 9504 / 1e9, delta=0.01)
+        self.assertTrue(1700 <= p["slots"] <= 2000, p["slots"])                   # ~16 GB of experts, 14-16%
+        # the engine may lend each prefill its staging buffers and the chunk's activations, beyond the reserve
+        env = sizing.engine_env(p)
+        lent = float(env["GLM53_EC_ELASTIC_GB"]) * GIB
+        self.assertGreaterEqual(lent + float(env["GLM53_EC_RESERVE_GB"]) * GIB, sizing.prefill_bytes(self.Q, 16384))
+        self.assertLessEqual(lent, p["cache"])                                    # and the cache has that much
+        self.assertEqual(sizing.live_resize_args(p)["elastic_bytes"], int(lent))
+        # the RAM cache to hold 90% of the experts with VRAM: ~80 GiB, more than this PC has
+        self.assertAlmostEqual(p["ram_target"] / GIB, 79, delta=2)
+
+    def test_smaller_cards(self):
+        self.assertEqual(sizing.plan(self.Q, 22 * GB, 65536)["chunk"], 8192)
+        p = sizing.plan(self.Q, 16 * GB, 65536)                                  # no room for 5.4 GB of staging
+        self.assertTrue(p["ok"])
+        self.assertEqual((p["staging"], p["chunk"]), (False, 1792))
+        self.assertFalse(sizing.plan(self.Q, 10 * GB, 65536)["ok"])
+        # staged prefill at 256K: ~19 GB, 6.5 GB more than Qwen's 3.05 (its staging and its weights)
+        self.assertAlmostEqual(sizing.min_budget(self.Q, 262144) / GB, 18.96, delta=0.01)
+        self.assertGreater(sizing.min_budget(self.Q, 262144), sizing.min_budget("3.05", 262144) + 6 * GB)
+
+    def test_it_fits_this_pc_with_half_its_experts_in_memory(self):
+        f = sizing.fit(self.Q, 29.5 * GB, sizing.ram_bytes(64), "windows-wsl")
+        self.assertTrue(f["ram_fits"])
+        self.assertEqual((f["context"], f["chunk"]), (262144, 16384))
+        self.assertTrue(0.4 < f["in_memory"] < 0.55, f["in_memory"])
+        self.assertGreater(sizing.fit(self.Q, 29.5 * GB, sizing.ram_bytes(128), "linux")["in_memory"], 0.89)
+
+    def test_the_presets_stay_qwens(self):
+        for vram, ram in ((8, 16), (16, 64), (32, 64), (48, 128)):
+            b = sizing.baseline(sizing.card_bytes(vram), sizing.ram_bytes(ram))
+            self.assertIn(b.get("quant", "3.05"), ("3.05", "4.05"))
+
+
 if __name__ == "__main__":
     unittest.main()

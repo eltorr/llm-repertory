@@ -27,7 +27,7 @@ class CatalogFileTests(unittest.TestCase):
     def test_the_catalog_validates(self):
         self.assertEqual(catalog.check(DATA, SCHEMA), [])
         cat = catalog.load()
-        self.assertEqual([m["quant"] for m in cat.models_for("exl3-offload")], ["3.05", "4.05"])
+        self.assertEqual([m["quant"] for m in cat.models_for("exl3-offload")], ["3.05", "4.05", "glm-3.05"])
 
     def test_the_file_is_kept_as_json_dumps_writes_it(self):
         # save_curation rewrites the file: it must come back byte for byte, so only the curation changes in a diff
@@ -40,14 +40,25 @@ class CatalogFileTests(unittest.TestCase):
             download, pack = (s["run"] for s in m["prepare"])
             self.assertEqual(download[download.index("--model-dir") + 1], "./" + m["paths"]["model_dir"], m["id"])
             self.assertEqual(download[download.index("--branch") + 1], m["source"]["branch"], m["id"])
+            for flag, value in (("--repo", m["source"]["huggingface"]), ("--sha", m["source"]["revision"])):
+                if flag in download:
+                    self.assertEqual(download[download.index(flag) + 1], value, m["id"])
             self.assertEqual(pack[pack.index("--name") + 1], catalog.store_name(m), m["id"])
+            self.assertEqual(pack[pack.index("--model") + 1], "./" + m["paths"]["model_dir"], m["id"])
             self.assertEqual(m["prepare"][1]["creates"], m["paths"]["store"], m["id"])
 
     def test_the_download_scripts_pins_are_the_catalogs(self):
+        # download.py keeps Qwen's pins for a run by hand with only --branch; another repository's entry passes its
+        # pin as --repo and --sha
         from engines.exl3_offload import download
         for m in DATA["models"]:
-            self.assertEqual(download.PINNED[m["source"]["branch"]], m["source"]["revision"], m["id"])
-            self.assertEqual(download.REPO, m["source"]["huggingface"], m["id"])
+            if m["source"]["huggingface"] == download.REPO:
+                self.assertEqual(download.PINNED[m["source"]["branch"]], m["source"]["revision"], m["id"])
+            else:
+                run = m["prepare"][0]["run"]
+                self.assertIn("--sha", run, m["id"])
+                self.assertIn("--repo", run, m["id"])
+                self.assertNotIn(m["source"]["branch"], download.PINNED, m["id"])
 
 
 class ValidatorTests(unittest.TestCase):
@@ -126,6 +137,42 @@ class LookupTests(unittest.TestCase):
             self.cat.model("5.0")
         with self.assertRaises(KeyError):
             self.cat.engine("vllm")
+
+    def test_glm(self):
+        m = self.cat.model("glm-5.3-flash-exl3-3.05")
+        self.assertIs(self.cat.model("glm-3.05"), m)
+        self.assertEqual((m["family"], m["label"], m["bpw"]), ("glm-5.3-flash", "GLM-5.3-Flash 3.05 bpw", 3.05))
+        self.assertEqual(m["source"], {"huggingface": "turboderp/GLM-5.3-Flash-exl3", "branch": "3.05bpw",
+                                       "revision": "332ab457b709b7ba30dd9a448be5de03b80a7ac9", "verify": "hub-hashes"})
+        self.assertEqual(m["paths"], {"model_dir": "model-glm-3.05", "store": "store/glm305.bin"})
+        self.assertEqual((catalog.setup_id(m), catalog.store_name(m), catalog.served_name(m)),
+                         ("mglm305", "glm305", "glm-5.3-flash"))
+        self.assertIn("Glm5NextForConditionalGeneration", self.cat.engine_of(m)["supports"]["architectures"])
+        # offered once curated, not before
+        self.assertFalse(m["offer_untested"])
+        self.assertFalse(catalog.offered(dict(m, curation={"status": "untested", "date": "2026-11-07", "checks": {}})))
+        self.assertTrue(catalog.offered(dict(m, curation={"status": "curated", "date": "2026-11-07", "checks": {}})))
+
+    def test_glms_facts_follow_from_its_config_and_the_engines_layout(self):
+        # config.json (text_config): 45 layers, the first 3 dense (42 MoE), 288 routed experts, top-8, one MTP layer;
+        # hidden 4096, expert width 2048
+        f = self.cat.model("glm-3.05")["facts"]
+        self.assertEqual((f["experts_per_layer"], f["moe_layers"], f["experts_per_token"], f["mtp"]),
+                         (288, 42, 8, True))
+        # a VRAM slot is the gate, up and down trellises at 3 bits; a store record adds the scales, 4K-aligned
+        # (glm53-flash-offload/docs/how-it-works.md: 9,437,184 and 9,474,048 B)
+        self.assertEqual(f["expert_bytes"], 3 * 4096 * 2048 * 3 // 8)
+        self.assertEqual((f["store_record_bytes"], f["store_record_bytes"] % 4096), (9_474_048, 0))
+        # what the packer wrote: the 42 layers and the MTP layer, 117.33 GB
+        self.assertAlmostEqual(f["store_record_bytes"] * 288 * 43 / 1e9, 117.33, delta=0.01)
+        # KV cache per token: 11 sparse-attention layers of exllamav3's MLA cache (cache/mla.py): the 512-wide latent
+        # (fp16, or quantized in 32-value groups with an fp16 scale each), the indexer's key plane (2 x 128 fp16)
+        # and its pooled keys (128 fp16 per 4 tokens); no RoPE part (qk_rope_head_dim 0)
+        planes = 2 * 128 * 2 + 128 // 4 * 2
+        want = {"16": 11 * (512 * 2 + planes)}
+        want.update({str(b): 11 * (512 // 32 * b * 4 + 512 // 32 * 2 + planes) for b in (2, 4, 8)})
+        self.assertEqual(f["kv_bytes_per_token"], want)
+        self.assertEqual(f["max_context"], 1048576)                     # max_position_embeddings
 
     def test_reference_paths_stay_in_the_reference_folder(self):
         self.assertEqual(catalog.reference_path("qwen3.8-flash-next-exl3-3.05").parent, catalog.REFERENCE_DIR)

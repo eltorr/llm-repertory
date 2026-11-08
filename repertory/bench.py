@@ -6,13 +6,15 @@ It takes the GPU: the manager stops the model first, refuses requests meanwhile,
 Runs are QUANT:VRAM_GB|card:CONTEXT[:nostage][:ram=GIB][:mtp=N][:cpu[=CPUS]][:prefetch], or a preset:
   current  the current settings on the whole card, as the full profile runs them
   lean     the current settings in the lean profile's VRAM and RAM
-  quants   3.05 and 4.05 bpw at the current context, on the whole card
-  matrix   8-32 GB cards emulated on this one: the README's measured table (needs a 32 GB card and 64 GB of RAM;
-           every run gets a 38 GiB RAM cache, so runs differ only in VRAM)
+  quants   each quant of the configured model (Qwen3.8-Flash-Next: 3.05 and 4.05 bpw) at the current context, on
+           the whole card
+  matrix   8-32 GB cards emulated on this one: the README's measured table, Qwen's two quants (needs a 32 GB card and
+           64 GB of RAM; every run gets a 38 GiB RAM cache, so runs differ only in VRAM)
 VRAM_GB holds the engine to that much VRAM, as on a smaller card after the desktop's share: QWEN_VRAM_LIMIT_BYTES sizes
 the expert cache, and QWEN_VRAM_GUARD_BYTES stops the server past it, as running out of memory would on that card. A
 smaller card's bandwidth can't be emulated, so real smaller cards are slower. ":nostage" forces staging-free prefill
-(1,536-token chunks); ":ram=GIB" sets the RAM cache (default: what the full profile would get now).
+(sizing.nostage_chunk: 1,536-token chunks for Qwen, 1,792 for GLM); ":ram=GIB" sets the RAM cache (default: what the
+full profile would get now). QUANT is a catalog model's (3.05, 4.05, glm-3.05).
 Engine features, off unless named: ":mtp=N" lets the MTP layer draft N tokens per step; ":cpu" computes RAM-resident
 experts on the CPU in decode (3-bit experts only: the engine refuses others), on the CPUs in ":cpu=2-15" (default the
 engine's); ":prefetch" starts NVMe reads for the next layer's predicted experts early.
@@ -63,9 +65,10 @@ BENCH_DIR = config.STATE / "bench"
 RUN_DIR = re.compile(r"^\d{8}-\d{6}(-\d+)?$")
 MAX_RUNS = 32
 PRESETS = {"current": "This machine's settings, whole card", "lean": "The lean profile",
-           "quants": f"{' and '.join(sizing.QUANTS)} bpw, whole card", "matrix": "8-32 GB cards emulated on this one"}
+           "quants": "Each quant of the configured model, whole card",
+           "matrix": "8-32 GB cards emulated on this one (Qwen's quants)"}
 # the README's measured table: card sizes after the desktop's share, each at the largest context that keeps staging.
-# Written for Qwen's two quants (it reproduces research/vram-scaling-torch-2.15), so hard-coded.
+# Written for Qwen's two quants (it reproduces research/vram-scaling-torch-2.15), so hard-coded; it stays Qwen's.
 # Every run gets the same RAM cache, as the earlier matrix (research/vram-scaling): sized from the RAM free when a run
 # starts, it varied with how much of the previous run's memory WSL had handed back yet (8-25 GiB a run).
 MATRIX_RAM = 38
@@ -206,6 +209,18 @@ def parse_run(spec):
             "cpu": cpu, "prefetch": prefetch, "label": label, "spec": ":".join(parts)}
 
 
+def family_quants(quant):
+    """The quants of the model `quant` belongs to (its catalog family), in catalog order."""
+    cat = catalog.load()
+    mine = cat.find(quant)
+    return [m["quant"] for m in cat.models_for(sizing.ENGINE) if mine is None or m["family"] == mine["family"]]
+
+
+def nostage_chunk(quant):
+    """A staging-free run's prefill chunk (sizing.nostage_chunk); 1,536 for a quant the catalog no longer has."""
+    return sizing.nostage_chunk(quant) if quant in sizing.QUANTS else 1536
+
+
 def expand(specs, cfg, lean_gb=None):
     """Presets and run specs -> runs."""
     if isinstance(specs, str):
@@ -220,7 +235,7 @@ def expand(specs, cfg, lean_gb=None):
                 raise ValueError("the lean profile's VRAM isn't known yet (no GPU sample)")
             runs.append(parse_run(f"{cfg['quant']}:{lean_gb:.1f}:{cfg['context']}:ram={int(cfg['lean_ram_gb'])}"))
         elif s == "quants":
-            runs += [parse_run(f"{q}:card:{cfg['context']}") for q in sizing.QUANTS]
+            runs += [parse_run(f"{q}:card:{cfg['context']}") for q in family_quants(cfg["quant"])]
         elif s == "matrix":
             runs += [parse_run(x) for x in MATRIX]
         else:
@@ -559,7 +574,7 @@ def table(records):
     for r in rows:
         e, plan, long = r.get("engine") or {}, r.get("plan") or {}, r.get("long") or {}
         nostage = r.get("nostage") or plan.get("staging") is False
-        chunk = "1,536, no staging" if nostage else f"{plan.get('chunk') or 0:,}"
+        chunk = f"{nostage_chunk(r['quant']):,}, no staging" if nostage else f"{plan.get('chunk') or 0:,}"
         card = f"{round(r['card_total_gb'] * 1e9 / 2**30)} GB, uncapped" if uncapped(r) else card_class(r["usable_gb"])
         vram = "whole card" if uncapped(r) else f"{r['usable_gb']:g} GB"
         head = (f"| {card} | {r['quant']} | {vram} | {r['context'] // 1024}K | {fmt(r.get('ram_gib'), '{} GiB')} | "
@@ -866,8 +881,9 @@ class Bench:
             # past this the server exits, as running out of memory would on the emulated card (slack for the desktop)
             env["QWEN_VRAM_GUARD_BYTES"] = str(int(m["vram_used"] + budget + 0.25 * GB))
         if r["nostage"]:
-            env.update({"QWEN_CHUNK": "1536", "GLM53_EC_STAGE_GB": "0", "GLM53_EC_ELASTIC_GB": "0",
-                        "GLM53_EC_RESERVE_GB": f"{sizing.nostage_reserve(r['quant'], 1536) / GIB:.2f}"})
+            c = nostage_chunk(r["quant"])
+            env.update({"QWEN_CHUNK": str(c), "GLM53_EC_STAGE_GB": "0", "GLM53_EC_ELASTIC_GB": "0",
+                        "GLM53_EC_RESERVE_GB": f"{sizing.nostage_reserve(r['quant'], c) / GIB:.2f}"})
         else:
             env.update(sizing.engine_env(plan))
         if r.get("mtp"):
