@@ -154,6 +154,17 @@ class DashboardTests(unittest.TestCase):
             svc.cfg.update(quant="4.05", offer_uncurated=True)
             self.assertEqual([c["offered"] for c in Service.model_choices(svc)], [False, True, False])
 
+    def test_the_baseline_keeps_glm_and_its_context(self):
+        # the presets are Qwen's: on GLM, applying the baseline takes its RAM thresholds, not Qwen's model
+        from engines.exl3_offload import sizing
+        b = sizing.baseline(sizing.card_bytes(32), sizing.ram_bytes(64), True, "windows-wsl")
+        cfg = dict(config.DEFAULTS, quant="glm-3.05", context=131072, ram_reserve_gb=4.0)
+        level, title, detail, settings = hardware.baseline_item(b, cfg)
+        self.assertEqual((level, settings), ("info", {"ram_reserve_gb": 6.0}))
+        self.assertIn("The presets are qwen3.8-flash-next's: glm-3.05 keeps its model and context.", detail)
+        _, _, _, settings = hardware.baseline_item(b, dict(cfg, quant="3.05"))
+        self.assertEqual((settings["quant"], settings["context"]), ("4.05", 262144))   # Qwen: as before
+
     def test_glm_is_offered_once_curated_and_serves_under_its_own_name(self):
         svc, Service = self.service(quant="4.05")
         with mock.patch.object(catalog, "load", with_curation):

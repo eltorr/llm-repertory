@@ -279,7 +279,13 @@ def baseline_item(b, cfg, have=None):
     if b.get("experimental"):
         detail += " Below 12 GB this is experimental."
     settings = {k: v for k, v in b["settings"].items() if cfg.get(k) != v}
-    if have is not None and not have.get(b["quant"]) and have.get(cfg["quant"]) and "quant" in settings:
+    family = {m["quant"]: m["family"] for m in catalog.load().models}
+    if family.get(cfg["quant"]) != family.get(b["quant"]) and "quant" in settings:
+        # the presets are Qwen's (sizing.baseline): another model keeps its model and context, and takes the RAM
+        # thresholds
+        detail += f" The presets are {family.get(b['quant'])}'s: {cfg['quant']} keeps its model and context."
+        settings = {k: v for k, v in settings.items() if k not in ("quant", "context")}
+    elif have is not None and not have.get(b["quant"]) and have.get(cfg["quant"]) and "quant" in settings:
         detail += (f" The {b['quant']} bpw model isn't downloaded yet: run its setup step, then apply this to switch.")
         settings = {k: v for k, v in settings.items() if k not in ("quant", "context")}
     title = (f"{b['quant']} bpw, {b['context'] // 1024}K context, {b['ram_cache_gib']} GiB RAM cache")
@@ -333,7 +339,11 @@ def recommend(hw, cfg):
     if sizing.max_context("3.05", budget, staging=False) == 0:
         pass                                    # the baseline item says why
     elif ctx_any == 0:
-        add("warn", f"{quant} bpw does not fit this GPU", "Use 3.05 bpw.", {"quant": "3.05"})
+        cat = catalog.load()
+        other = cat.model("3.05")["family"]
+        add("warn", f"{quant} bpw does not fit this GPU",
+            "Use 3.05 bpw." if (cat.find(quant) or {}).get("family") == other else f"Use {other} at 3.05 bpw.",
+            {"quant": "3.05"})
     else:
         level = "ok" if vram >= 15e9 else "warn"
         tested = "" if vram >= 15e9 else " Below 16 GB is experimental: smaller prefill chunks and a smaller cache."
