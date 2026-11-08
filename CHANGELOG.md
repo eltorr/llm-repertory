@@ -2,6 +2,27 @@
 
 What changed in Repertory, newest first.
 
+## 2026-11-07: GLM-5.3-Flash in the catalog
+
+- **A second model** ([docs](docs/engines.md#qwen-and-glm)): GLM-5.3-Flash at 3.05 bpw (`glm-3.05`, setup step
+  `mglm305`, served as `glm-5.3-flash`), pinned to turboderp's upload, with its download and its expert store
+  (117.3 GB with the MTP layer). It isn't offered until it passes curation on a GPU. Its facts come from its
+  config.json, ExLlamaV3's cache layout and glm53-flash-offload's docs; the VRAM outside the expert cache and the
+  activations per prompt token are the engine's own figures for this model, to be measured.
+- **Sizing per model:** a chunk's activations are a catalog fact, the staging-free chunk follows the model's top-k
+  (1,792 tokens for GLM's top-8), and the share of the VRAM cache the engine may lend a prefill grows to what the
+  plan needs (GLM's two staging buffers alone are 5.4 GB). Sizing stops at the manager's 262,144 tokens of context.
+  Qwen's numbers are unchanged, and so are the README's tables.
+- **The model server picks the chat format by the model** (config.json's `model_type`): Qwen3.8's, or GLM-5.3's
+  (`engines/exl3_offload/glm_chat.py`): its template in the sandbox, its tool calls, its sampling values, its
+  reasoning levels (OpenAI's high is GLM's High, xhigh its Max) and its end-of-turn tokens. GLM's template always
+  opens the think block, so thinking off writes it empty. The engine takes a model's reasoning levels as a hook
+  (`EFFORTS`). `/v1/models` lists the catalog's name for the model folder.
+- **The rest follows the catalog:** bench run specs such as `glm-3.05:card:131072`, the `quants` preset (the
+  configured model's quants), run.sh by hand for any catalog quant, and curation's architecture check (GLM's
+  `n_routed_experts`, the MoE layers and the MTP layer must match the entry). The preset rule and the benchmark's
+  `matrix` stay Qwen's; with GLM configured, the baseline recommendation keeps GLM and its context.
+
 ## 2026-11-07: the catalog drives the platform; curation
 
 - **The catalog is read** ([docs](docs/catalog.md)): `repertory/catalog.py` loads `catalog/catalog.json` and checks

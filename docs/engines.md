@@ -9,19 +9,38 @@ passed curation: a compatibility check and a regression check on the GPU (`reper
 
 - **The engine runs both.** sybil-solutions' glm53-flash-offload was built for GLM-5.3-Flash. Repertory added
   Qwen3.8-Flash-Next and kept GLM working: the engine's size limits cover both models (512 or 288 experts per layer,
-  top-10 or top-8), and GLM's chat and tool-call handling is still there.
-- **GLM's side is untested here**: this PC has no GLM model to run it with.
-- **Repertory offers only Qwen today**: the catalog has its two quants, and the model server only Qwen's chat
-  format. Setup, the dashboard and sizing take their models from the catalog; what is still written for Qwen is
-  listed in [the catalog](catalog.md#an-entry). Adding GLM means:
-  - its architecture in the engine's `supports`, and a catalog entry;
-  - sizing for its shape (288 experts, top-8): its facts, and the constants still sized for Qwen's top-10;
-  - its chat format in the model server;
-  - downloading it and packing its expert store;
-  - the curation checks and a GPU run.
+  top-10 or top-8).
+- **GLM-5.3-Flash 3.05 bpw is in the catalog** (`glm-3.05`, served as `glm-5.3-flash`), and **untested until it is
+  curated**: it isn't offered until `repertory curate glm-3.05` passes on a GPU (setup and Settings show it with
+  *Also offer models that haven't passed curation*, or by name: `repertory setup mglm305`). Repertory gives it:
+  - the engine's `supports` and a catalog entry, with its facts (below);
+  - sizing from those facts: its staging buffers (two of one layer's experts: 5.4 GB), the activations of a prefill
+    chunk, the staging-free chunk for top-8 (1,792 tokens) and an elastic share big enough for its prefill;
+  - its chat format in the model server (`engines/exl3_offload/glm_chat.py`, chosen by config.json's
+    `model_type`): the model's template in the sandbox, its `<arg_key>`/`<arg_value>` tool calls (the format
+    glm53-flash-offload's `serve.py` parses), generation_config.json's sampling values, its reasoning levels (Low,
+    High, Max) and its end-of-turn tokens. The template has no thinking switch: it always opens the think block, so
+    thinking off writes it empty, as the engine's own server did;
+  - its download (pinned like Qwen's) and its expert store (`store/glm305.bin`, 117.3 GB with the MTP layer).
+- **Its facts and where they come from** (the ones marked are to be measured on the GPU):
+
+  | Fact | Value | From |
+  |---|---|---|
+  | experts per layer, top-k, MoE layers, MTP | 288, 8, 42, yes | config.json: `n_routed_experts`, `num_experts_per_tok`, 45 layers less the 3 dense (`mlp_layer_types`), `num_nextn_predict_layers` 1 |
+  | expert bytes (a VRAM slot) | 9,437,184 | gate, up and down at 3 bits (4,096 x 2,048 each); glm53-flash-offload's docs |
+  | store record bytes | 9,474,048 | the packer, and glm53-flash-offload's docs |
+  | KV bytes per token (2, 4, 8, 16 bits) | 8,096, 9,504, 12,320, 17,600 | ExLlamaV3's MLA cache for its 11 sparse-attention layers: the 512-wide latent, the indexer's key plane and its pooled keys (`exllamav3/cache/mla.py`) |
+  | largest context | 1,048,576 (sized up to the manager's 262,144) | config.json `max_position_embeddings` |
+  | non-expert VRAM | 8.65 GB, **to measure** | sybil-solutions' runs on an RTX 3090: 10.55-10.95 GB outside the expert cache at a 131,072-token FP16 context, less that context's KV cache |
+  | prefill activations per token | 0.6 MB, **to measure** | the engine's own estimate for this model (`GLM53_EC_ACT_MB_PER_TOK`) |
+
+- **Not run on this engine yet:** curation's token replay for GLM (teacher forcing through `/generate`, ExLlamaV3's
+  cache-free attention on its sparse-attention and KDA layers), MTP, the CPU lane under Repertory, and any speed.
+- **Still Qwen's:** the preset rule and the benchmark's matrix ([the catalog](catalog.md#an-entry)).
 - **Whether GLM is worth it on a given PC** is a separate question. At 3.05 bpw it is about 125 GB, more than a
-  32 GB card plus 64 GB of RAM, so more of it comes from the SSD. sybil-solutions measured 19.5 tok/s on an RTX 3090
-  with a 55 GiB RAM cap.
+  32 GB card plus 64 GB of RAM, so more of it comes from the SSD: on the RTX 5090 with 64 GB, sizing plans about
+  1,700-1,900 experts in VRAM and a 34 GiB RAM cache at 256K, about half the experts in memory. sybil-solutions
+  measured 19.5 tok/s on an RTX 3090 with a 55 GiB RAM cap.
 
 ## Where the code runs
 
@@ -44,7 +63,8 @@ passed curation: a compatibility check and a regression check on the GPU (`reper
   - the checks every model gets: a prompt that fills the context is refused before it runs, a request that isn't
     one or that the chat template refuses is a 400, and usage reports the prompt tokens the prefix cache served;
   - the model's own parts are hooks a model server sets: the chat template, the tool-call parser, sampling defaults,
-    stop tokens and the tags. The model server sets Qwen's (`qwen_chat.py`) and adds only Repertory's routes.
+    reasoning levels (`EFFORTS`), stop tokens and the tags. The model server sets the model's (`qwen_chat.py` or
+    `glm_chat.py`, by config.json's `model_type`), lists the catalog's name for it, and adds only Repertory's routes.
 
 ## Open
 

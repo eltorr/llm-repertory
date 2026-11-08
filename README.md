@@ -8,7 +8,8 @@ scales itself back or pauses, and when the game closes, the model takes the reso
 
 Today it serves Qwen3.8-Flash-Next, a 125B mixture-of-experts model, at up to 256K context on cards from 8 to 48 GB.
 The experts that don't fit in VRAM are kept in RAM and on the SSD. Clients use an OpenAI-compatible API at
-`http://127.0.0.1:30000/v1`.
+`http://127.0.0.1:30000/v1`. GLM-5.3-Flash (320B, 125 GB at 3.05 bpw) is in the catalog too, and is offered once it
+passes curation ([engines and models](docs/engines.md)).
 
 ![The dashboard: model state, requests, pressure from other apps, memory](docs/media/dashboard.png)
 
@@ -82,7 +83,7 @@ engine's code changed.
 | Part | Folder | What it does |
 |---|---|---|
 | Manager | [repertory/](repertory) | The service on port 30000: the API front door, the dashboard, setup, benchmarks, and the model's lifecycle (full, lean, paused, live resize) |
-| Model server | [engines/exl3_offload/](engines/exl3_offload) | Runs the model behind the manager: Qwen's chat format and tool calls, memory guards, sizing, verified downloads |
+| Model server | [engines/exl3_offload/](engines/exl3_offload) | Runs the model behind the manager: its chat format and tool calls (Qwen3.8, GLM-5.3), memory guards, sizing, verified downloads |
 | ExLlamaV3 | [exllamav3/](exllamav3) | turboderp's inference library: the model code and the EXL3 quantized kernels |
 | Offload engine | [glm53-flash-offload/](glm53-flash-offload) | sybil-solutions' expert tiers: the hottest experts in VRAM, more in RAM, the rest read from NVMe; the OpenAI APIs on one pipeline |
 | Catalog | [catalog/](catalog) | The models and engines, each pinned to one upload, with how to build, prepare and serve them; setup, the dashboard and sizing read it |
@@ -164,11 +165,13 @@ capping its VRAM). Every configuration is in [docs/measured.md](docs/measured.md
 
 ## Credits
 
-- [ExLlamaV3](https://github.com/turboderp-org/exllamav3) by turboderp: the inference library, and the
-  [EXL3 quants of Qwen3.8-Flash-Next](https://huggingface.co/turboderp/Qwen3.8-Flash-Next-exl3) that setup downloads.
+- [ExLlamaV3](https://github.com/turboderp-org/exllamav3) by turboderp: the inference library, and the EXL3 quants
+  of [Qwen3.8-Flash-Next](https://huggingface.co/turboderp/Qwen3.8-Flash-Next-exl3) and
+  [GLM-5.3-Flash](https://huggingface.co/turboderp/GLM-5.3-Flash-exl3) that setup downloads.
 - [glm53-flash-offload](https://github.com/sybil-solutions/glm53-flash-offload) by sybil-solutions (0xSero): the
   offload engine, with its VRAM, RAM and NVMe expert tiers, the nv2 engine and its kernels.
-- [Qwen3.8-Flash-Next](https://huggingface.co/Qwen/Qwen3.8-Flash-Next) by the Qwen team: the model.
+- [Qwen3.8-Flash-Next](https://huggingface.co/Qwen/Qwen3.8-Flash-Next) by the Qwen team, and
+  [GLM-5.3-Flash](https://github.com/zai-org/GLM-5) by Z.ai: the models.
 
 The project began as a fork of [MaxDevv/lean-qwenflash](https://github.com/MaxDevv/lean-qwenflash); no code from it
 remains.
