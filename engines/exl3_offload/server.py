@@ -41,24 +41,28 @@ import qwen_chat  # noqa: E402
 RESIZE_KEYS=('vram_limit_bytes','max_slots','reserve_bytes','elastic_bytes','torch_limit_bytes','chunk','ram_bytes')
 GIB=1024**3
 
+class ResizeError(ValueError):
+    """A /expert_cache/resize body this server refuses: its message is for the manager."""
+
+
 def resize_args(body):
     """Checks a /expert_cache/resize body. Every field is optional and a whole non-negative number; the limits and the
     RAM cache size must be positive, and chunk a multiple of the 256-token page."""
-    if not isinstance(body,dict):raise ValueError('expected a JSON object')
+    if not isinstance(body,dict):raise ResizeError('expected a JSON object')
     extra=sorted(set(body)-set(RESIZE_KEYS))
-    if extra:raise ValueError('unknown fields: '+', '.join(extra))
+    if extra:raise ResizeError('unknown fields: '+', '.join(extra))
     out={}
     for k in RESIZE_KEYS:
         v=body.get(k)
         if v is None:continue
         if isinstance(v,bool) or not isinstance(v,(int,float)) or not 0<=v<2**50 or v!=int(v):
-            raise ValueError(f'{k} must be a whole number of at least 0')
+            raise ResizeError(f'{k} must be a whole number of at least 0')
         out[k]=int(v)
     if 0 in (out.get('vram_limit_bytes'),out.get('torch_limit_bytes'),out.get('elastic_bytes'),out.get('ram_bytes')):
-        raise ValueError('the limits, elastic_bytes and ram_bytes must be positive')
+        raise ResizeError('the limits, elastic_bytes and ram_bytes must be positive')
     c=out.get('chunk')
     if c is not None and not (256<=c<=65536 and c%256==0):
-        raise ValueError('chunk must be a multiple of 256, up to 65536')
+        raise ResizeError('chunk must be a multiple of 256, up to 65536')
     return out
 
 def move_ram_limits(host,delta):
@@ -339,8 +343,10 @@ class Server:
         from fastapi.responses import JSONResponse
         try:
             a = resize_args(json.loads(await req.body() or b'{}'))
-        except ValueError as e:
+        except ResizeError as e:
             return JSONResponse({'error': str(e)}, 400)
+        except ValueError:                      # not JSON at all
+            return JSONResponse({'error': 'expected a JSON object'}, 400)
         import expert_cache
         import nv2
         import torch

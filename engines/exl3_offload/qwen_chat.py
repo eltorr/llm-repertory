@@ -47,6 +47,7 @@ def with_sampling(body):
 # ------------------------------------------------------------------------------------------------------------ prompt
 class TemplateError(ValueError):
     """The template refused the conversation (its raise_exception), e.g. a role it doesn't know."""
+    public = True       # the template's own words, for the client (serve.request_error returns them)
 
 
 def _refuse(message):

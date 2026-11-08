@@ -1,19 +1,28 @@
 # Lints Repertory's own Python (tools/scan.sh and the Checks workflow). The bundled engine (exllamav3 and
-# glm53-flash-offload) keeps its own style.
+# glm53-flash-offload) keeps its own style; CodeQL scans it.
 line-length = 120
 include = [
     "repertory/**/*.py",
     "engines/**/*.py",
     "tests/*.py",
+    "tools/*.py",
     "bin/repertory-timestamp",
 ]
 
 [lint]
-# pyflakes and pycodestyle errors, likely bugs (bugbear), and the security checks that matter here: exec/eval, pickle,
-# unsafe YAML, shell=True, hard-coded /tmp paths
-select = ["E", "F", "W", "B", "S102", "S108", "S301", "S307", "S506", "S602", "S604", "S605"]
+# pyflakes and pycodestyle errors, likely bugs (bugbear), and every security check (flake8-bandit)
+select = ["E", "F", "W", "B", "S"]
+# security checks left out, each for its reason:
+ignore = [
+    "S101",   # assert: used for internal invariants, never to check input (input is checked with explicit errors)
+    "S110",   # try/except/pass: deliberate best-effort cleanup (closing a socket that may be gone)
+    "S310",   # urlopen with any scheme: every address is built here (127.0.0.1, Hugging Face); httpio.http_url and
+              # download.fetch refuse schemes other than http(s) where an address could come from elsewhere
+    "S603",   # subprocess without a shell: fixed argument lists, no shell, nothing from a request
+    "S607",   # partial executable path: system tools by name (systemctl), as the platform installs them
+]
 
 [lint.per-file-ignores]
 # the live-resize code and LocalOnly keep their compact style
 "engines/exl3_offload/server.py" = ["E701", "E702"]
-"tests/*" = ["S108"]                            # attack strings, not temp files
+"tests/*" = ["S108", "S105", "S106"]            # attack strings and test secrets, not temp files or real passwords

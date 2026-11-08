@@ -347,8 +347,7 @@ class Service:
                # loopback only: WSL forwards Windows' localhost to it, and nothing else on the VM's network reaches it
                "HOST": "127.0.0.1",
                # the manager handles contention; never let the in-process guard hard-kill a request
-               "QWEN_VRAM_GUARD_BYTES": str(int(m["vram_total"] + 2 * GB)),
-               "REPERTORY_BACKEND_KEY": self.backend_key}
+               "QWEN_VRAM_GUARD_BYTES": str(int(m["vram_total"] + 2 * GB))}
         capped = tier == "lean" or bool(self.learned.get(self.learned_key(), {}).get("vram_cap"))
         if tier == "full" and not capped:
             env["QWEN_VRAM_LIMIT_BYTES"] = str(int(m["vram_total"] - self.headroom(m)))
@@ -412,7 +411,9 @@ class Service:
         if host.follower:
             host.follower.clear()
         t0 = time.time()
-        ok, pid = await asyncio.to_thread(host.backend_start, env, ["server"])
+        # the key joins the environment only here, so nothing that records env (backend.json) ever holds it
+        ok, pid = await asyncio.to_thread(host.backend_start, {**env, "REPERTORY_BACKEND_KEY": self.backend_key},
+                                          ["server"])
         if not ok:
             return await self._start_failed(tier, f"launcher refused: {pid}")
         self.be.pid = pid

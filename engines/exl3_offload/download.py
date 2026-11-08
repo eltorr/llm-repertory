@@ -23,6 +23,7 @@ import json
 import os
 import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path, PurePosixPath
 
@@ -73,7 +74,9 @@ class Remote:
 
 def file_digest(path, blob):
     """sha256 of the bytes, or for a small file kept in git, its blob id (sha1 of a header and the bytes)."""
-    h = hashlib.sha1(b"blob %d\0" % Path(path).stat().st_size) if blob else hashlib.sha256()
+    # git names a file by this sha1: a fixed format to compare against, not a choice of hash for security
+    h = (hashlib.sha1(b"blob %d\0" % Path(path).stat().st_size, usedforsecurity=False) if blob
+         else hashlib.sha256())
     with open(path, "rb") as f:
         while block := f.read(16 * 1024 ** 2):
             h.update(block)
@@ -133,7 +136,7 @@ class Partial:
 
     def open(self):
         self.final.parent.mkdir(parents=True, exist_ok=True)
-        self.fd = os.open(self.part, os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o644)
+        self.fd = os.open(self.part, os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600)   # owner only
         os.ftruncate(self.fd, self.remote.size)
 
     def write(self, offset, data):
@@ -178,6 +181,7 @@ class Partial:
 
 def fetch(url, start, end, size):
     """Bytes start..end of the file at `url`, retried; the server must answer with exactly that range."""
+    check(urllib.parse.urlsplit(url).scheme in ("https", "http"), f"refusing a URL that isn't HTTP(S): {url[:80]}")
     want = f"bytes {start}-{end}/{size}"
     for attempt in range(TRIES):
         try:

@@ -689,7 +689,7 @@ class Bench:
             ram_gib = sizing.ram_cache_gib(target, svc.ram_for_start(m), cfg, svc.ram_overhead(r["quant"]),
                                            min(caps) if caps else None)
         env = {"QUANT": r["quant"], "CONTEXT": str(r["context"]), "PORT": str(cfg["backend_port"]),
-               "HOST": "127.0.0.1", "RAM_GB": str(ram_gib), "REPERTORY_BACKEND_KEY": svc.backend_key}
+               "HOST": "127.0.0.1", "RAM_GB": str(ram_gib)}
         if r["vram_gb"] is None:
             env["QWEN_VRAM_LIMIT_BYTES"] = str(int(m["vram_total"] - svc.headroom(m)))
             env["QWEN_VRAM_GUARD_BYTES"] = str(int(m["vram_total"] + 2 * GB))
@@ -747,7 +747,8 @@ class Bench:
             return rec
         env, rec["ram_gib"] = self.engine_env(r, plan, m, budget)
         t0 = time.time()
-        ok, pid = await asyncio.to_thread(svc.host.backend_start, env, ["server"])
+        ok, pid = await asyncio.to_thread(svc.host.backend_start, {**env, "REPERTORY_BACKEND_KEY": svc.backend_key},
+                                          ["server"])
         watcher = asyncio.create_task(self.watch()) if ok else None
         try:
             up = False

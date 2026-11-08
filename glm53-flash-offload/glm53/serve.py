@@ -198,6 +198,7 @@ def ids_of(body):
 class ContextFull(ValueError):
     """The prompt fills the context: no room is left for an answer (HTTP 400)."""
     code = "context_length_exceeded"
+    public = True       # written for the client: request_error returns its message
 
     def __init__(self, prompt_tokens, context):
         super().__init__(f"the prompt has {prompt_tokens:,} tokens and this server's context holds {context:,}, which "
@@ -378,9 +379,15 @@ def stops_of(body):
 
 
 def request_error(e):
-    """OpenAI's 400 for a request this server can't run: the ValueError preparing it raised (RequestError for the body,
-    a template's refusal, ContextFull with its code)."""
-    return JSONResponse({"error": {"message": str(e), "type": "invalid_request_error", "param": None,
+    """OpenAI's 400 for a request this server can't run, from the ValueError preparing it raised. Errors written for
+    the client (their class says `public`: RequestError for the body, ContextFull, a chat template's refusal) go back
+    as they are; any other one gets a generic message, and its text goes to this server's log instead."""
+    if getattr(type(e), "public", False):
+        message = str(e)
+    else:
+        print(f"request refused: {type(e).__name__}: {e}", flush=True)
+        message = "invalid request"
+    return JSONResponse({"error": {"message": message, "type": "invalid_request_error", "param": None,
                                    "code": getattr(e, "code", None)}}, status_code=400)
 
 

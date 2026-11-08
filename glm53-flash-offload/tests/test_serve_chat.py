@@ -262,7 +262,7 @@ class BothApis(Serve):
 
     def test_a_template_refusal_is_a_400(self):
         class Refused(ValueError):
-            pass
+            public = True           # a wrapper's refusal written for the client
 
         def refuse(messages, thinking, tools, kw):
             raise Refused("System message must be at the beginning.")
@@ -271,6 +271,15 @@ class BothApis(Serve):
                 r = asyncio.run(getattr(self.serve, route)(FakeReq(body)))
                 err = json.loads(r.body)["error"]
                 self.assertEqual((r.status_code, err["message"]), (400, "System message must be at the beginning."))
+
+    def test_any_other_error_while_preparing_is_a_generic_400(self):
+        def broken(messages, thinking, tools, kw):
+            raise ValueError("invalid literal for int() with base 10: '/srv/models/secret-path'")
+        with mock.patch.multiple(self.serve, chat_prompt=broken):
+            for route, body in (("chat", self.CHAT), ("responses", self.RESPONSES)):
+                r = asyncio.run(getattr(self.serve, route)(FakeReq(body)))
+                err = json.loads(r.body)["error"]
+                self.assertEqual((r.status_code, err["message"]), (400, "invalid request"))   # its text: the log only
 
 
 if __name__ == "__main__":

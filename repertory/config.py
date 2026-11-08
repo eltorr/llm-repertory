@@ -242,9 +242,11 @@ def load_json(name, default):
 
 
 def save_json(name, data):
+    """Write a state file readable by this user only, like config.json."""
     p = STATE / name
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        f.write(json.dumps(data, indent=2))
     os.replace(tmp, p)
 
 

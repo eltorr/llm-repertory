@@ -2,6 +2,22 @@
 
 What changed in Repertory, newest first.
 
+## 2026-11-07: security
+
+The repository is public. Before it went public, every commit was checked for private data, and the code scanning
+findings were fixed:
+- **Error messages:** a request the server can't run gets back only messages written for clients (a bad request
+  body, a full context, a chat template's refusal). Any other error gets "invalid request", and its text goes to the
+  server's log, not to the client.
+- **File permissions:** downloaded model files, the packed expert store and every state file are created readable by
+  their owner only. The backend key is added to the model server's environment only as it starts, so nothing that
+  records that environment (`backend.json`) ever holds it.
+- **URLs:** every place that opens a URL refuses anything but http(s).
+- **Lint** runs every flake8-bandit security check; the few left out are listed in `ruff.toml` with their reasons.
+- [SECURITY.md](SECURITY.md): how to report a vulnerability privately.
+- On GitHub: Dependabot alerts and security updates, secret scanning with push protection, and private vulnerability
+  reporting are on.
+
 ## 2026-11-07: docs and dashboard
 
 - The repository is now `eltorr/llm-repertory` (the old address redirects); the product, the package and the

@@ -243,7 +243,7 @@ def main():
               f"{total / 1e9:.2f} GB, free {free / 1e12:.2f} TB, mul1 markers {mul1}"
               + (f"; PARTIAL: layers {pl}, first {len(pe)} experts ({size / 1e9:.2f} GB)" if partial else ""), flush=True)
         assert size < free * 0.9, "not enough free space"
-        fd = os.open(out_bin, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_DIRECT, 0o644)
+        fd = os.open(out_bin, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_DIRECT, 0o600)   # owner only
         if partial:
             os.ftruncate(fd, total)                  # sparse: only the packed records take space
         else:

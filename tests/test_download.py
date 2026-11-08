@@ -12,7 +12,8 @@ import download as D  # noqa: E402
 
 
 def remote(name, data, blob=False):
-    digest = hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest() if blob else hashlib.sha256(data).hexdigest()
+    digest = (hashlib.sha1(b"blob %d\0" % len(data) + data, usedforsecurity=False).hexdigest() if blob   # git's id
+              else hashlib.sha256(data).hexdigest())
     return D.Remote(name, len(data), digest, blob)
 
 

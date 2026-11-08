@@ -30,6 +30,7 @@ _STORE = OrderedDict()   # response id -> chat messages of that conversation, th
 
 class RequestError(ValueError):
     """An invalid or unsupported request (HTTP 400): a Responses request, or a body that isn't a request at all."""
+    public = True       # written for the client: serve.request_error returns its message
 
 
 def _id(prefix):

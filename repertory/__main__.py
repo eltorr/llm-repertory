@@ -21,7 +21,7 @@ from pathlib import Path
 
 from . import config
 from .config import GB, IS_WINDOWS, REPO
-from .httpio import http_get_json, http_ok
+from .httpio import http_get_json, http_ok, http_url
 
 
 def service_url(cfg):
@@ -258,7 +258,8 @@ def cmd_plan(cfg, a):
 
 
 def post_json(url, body, headers, timeout=30):
-    req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json", **headers})
+    req = urllib.request.Request(http_url(url), json.dumps(body).encode(),
+                                 {"Content-Type": "application/json", **headers})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read())

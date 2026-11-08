@@ -126,9 +126,17 @@ def oai_error(msg, kind="server_busy", code=503):
     return {"error": {"message": msg, "type": kind, "code": code}}
 
 
+def http_url(url):
+    """`url`, if it is an http(s) one; anything else (file:, ftp:, a custom scheme) is refused before it's opened."""
+    import urllib.parse
+    if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+        raise ValueError(f"not an HTTP URL: {url[:80]}")
+    return url
+
+
 def http_get_json(url, timeout=2.0, headers=None):
     import urllib.request
-    with urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), timeout=timeout) as r:
+    with urllib.request.urlopen(urllib.request.Request(http_url(url), headers=headers or {}), timeout=timeout) as r:
         return json.load(r)
 
 
@@ -136,7 +144,7 @@ def http_post_json(url, body, timeout=2.0, headers=None):
     """POSTs a JSON body; returns (status, the decoded JSON reply or None). A connection failure raises OSError."""
     import urllib.error
     import urllib.request
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+    req = urllib.request.Request(http_url(url), data=json.dumps(body).encode(), method="POST",
                                  headers={"Content-Type": "application/json", **(headers or {})})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -151,7 +159,8 @@ def http_post_json(url, body, timeout=2.0, headers=None):
 def http_ok(url, timeout=2.0, headers=None):
     import urllib.request
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), timeout=timeout) as r:
+        with urllib.request.urlopen(urllib.request.Request(http_url(url), headers=headers or {}),
+                                    timeout=timeout) as r:
             return r.status == 200
     except Exception:  # noqa: BLE001
         return False

@@ -55,7 +55,9 @@ jobs:
           rows, high = [], 0
           for path in glob.glob("sarif/*.sarif"):
               run = json.load(open(path))["runs"][0]
-              rules = {r["id"]: r for r in run["tool"]["driver"].get("rules", [])}
+              # the rules' severities are in the query packs (tool.extensions), not only in tool.driver
+              parts = [run["tool"]["driver"], *run["tool"].get("extensions", [])]
+              rules = {r["id"]: r for part in parts for r in part.get("rules", [])}
               for res in run.get("results", []):
                   rule = rules.get(res.get("ruleId"), {})
                   sev = float((rule.get("properties") or {}).get("security-severity") or 0)
