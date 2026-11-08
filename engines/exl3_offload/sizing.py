@@ -282,9 +282,14 @@ def ram_cache_gib(need, ram_avail, policy, overhead, cap_gib=None):
     if cap_gib:
         want = min(want, int(cap_gib))
         floor = min(floor, int(cap_gib))
+    return int(max(floor, min(want, ram_spare_gib(ram_avail, policy, overhead))))
+
+
+def ram_spare_gib(ram_avail, policy, overhead):
+    """The biggest RAM cache (GiB) the host can spare now: free RAM stays clear of the scale-back threshold (lean's
+    plus 3 GB, at least the reserve) after the server's `overhead`."""
     keep = max(policy["ram_reserve_gb"], policy["ram_lean_gb"] + 3) * GB
-    spare = (ram_avail - keep - overhead) // GIB
-    return int(max(floor, min(want, spare)))
+    return int((ram_avail - keep - overhead) // GIB)
 
 
 def nostage_min_budget(quant, context, kv_bits=4):

@@ -166,17 +166,22 @@ repertory bench --list | --table FOLDER | --sizing FOLDER
   Results from this workload don't compare 1:1 with those, or with his; a run is only compared with earlier runs of
   the same protocol.
 - **The PC comes first.** When a game or another app needs the GPU (an app on the watchlist, another app's GPU load,
-  or its VRAM crowding the card) or RAM nearly runs out, the run steps aside: its server stops, and the run starts
-  again from the beginning once the PC has been free for `recover_after_s`. A run interrupted four times is recorded
-  as interrupted, and the benchmark moves on.
+  or its VRAM crowding the card) or free RAM falls below `ram_pause_gb`, the run steps aside: its server stops, and
+  the run starts again from the beginning once the PC has been free for `recover_after_s`. A run interrupted four
+  times is recorded as interrupted, and the benchmark moves on.
+- **RAM:** as the manager does, a run drops the page cache in WSL once its server is up and after it stops (loading
+  leaves gigabytes there that Windows counts as used). A run with a set RAM cache (`:ram=GIB`) starts only if the PC
+  can spare it, as the manager would size it; just after a stop it first waits for WSL to hand the last server's
+  memory back. Otherwise it is skipped with the RAM it would have had. Each run records the least free RAM while its
+  server was up (`ram_free_min_gb`).
 - **Resuming:** a benchmark cut short (cancelled, the manager restarted, the PC rebooted) continues with
   `repertory bench --resume` or the tab's **Resume** button. The runs left go into the same folder, with the same
   workload.
 - **A run spec** is `QUANT:VRAM_GB|card:CONTEXT[:nostage][:ram=GIB]`. A VRAM figure holds the engine to that much, as on
   a smaller card. It can't emulate a smaller card's bandwidth, so real smaller cards are slower.
 - **Results:** one JSON file per run in `bench/` in the settings folder, saved after every step, with the machine
-  and its stack (GPU, driver, CUDA, PyTorch, commit). Each run shows the change since the last run of the same configuration, which makes a quick
-  before-and-after check of a change.
+  and its stack (GPU, driver, CUDA, PyTorch, commit). Each run shows the change since the last run of the same
+  configuration, which makes a quick before-and-after check of a change.
 - Without the service running, `repertory bench` runs in the terminal, and leaves the model stopped.
 
 ## Where things are

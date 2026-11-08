@@ -36,10 +36,12 @@ used the prompts and documents of the benchmark.py in MaxDevv/lean-qwenflash, wh
 results don't compare 1:1 with those (or with his), and runs are only compared with runs of the same protocol.
 
 The PC comes first. When a game or another app needs the GPU (a watched app, another app's GPU load, or its VRAM
-crowding the card) or RAM nearly runs out, the run steps aside: its server stops, the benchmark waits until the PC has
-been free for `recover_after_s`, then does that run again from the start. Finished runs are kept. A benchmark cut short
-(cancelled, the manager restarted, the PC rebooted) continues with `repertory bench --resume` or the tab's Resume
-button: the runs left go into the same folder.
+crowding the card) or free RAM falls below the manager's ram_pause_gb, the run steps aside: its server stops, the
+benchmark waits until the PC has been free for `recover_after_s`, then does that run again from the start. Finished
+runs are kept. As the manager does, a run drops the VM's page cache once its server is up and after it stops, and a
+set RAM cache (":ram=GIB") starts only if the PC can spare it (after a stop, once WSL has handed the RAM back).
+A benchmark cut short (cancelled, the manager restarted, the PC rebooted) continues with `repertory bench --resume`
+or the tab's Resume button: the runs left go into the same folder.
 
 Results: one JSON per run in the settings folder (bench/<date-time>/), saved after every step, with the machine and
 its stack (GPU, driver, CUDA, PyTorch, commit) and the change since the last run of the same configuration. The
@@ -110,7 +112,7 @@ WATCH_S = 1.0                       # how often a run checks whether the PC need
 YIELD_AFTER_S = 10                  # how long the PC must need them before the run steps aside
 MAX_YIELDS = 3                      # a run interrupted more often is recorded as interrupted (resume redoes it)
 REPLACED = "another model server replaced this run's on its port: what was measured may be that server's"
-RAM_FLOOR_GB = 1.0                  # free RAM below this: the PC is about to run out
+RAM_FLOOR_GB = 1.0                  # free RAM below this (or the manager's ram_pause_gb, if higher): the PC is short
 PLAN = "_plan.json"                 # the benchmark's runs and workload, for resuming (not a result)
 
 # Curation's regression requests: the cases of research/engine-parity/engine_compare.py, byte for byte (so its results
@@ -649,6 +651,7 @@ class Bench:
         self.resume_dir = None                 # the folder of the benchmark being continued
         self.base = None                       # the GPU just before this run's server started: other apps' baseline
         self.yielded = self.waiting = None     # why this run stepped aside; what the PC still needs
+        self.ram_low = None                    # the least free RAM while this run's server is up
         self.echo = None                       # also print each line (`repertory bench` without the service)
         last = history(1)
         if last:                               # show the latest results after a restart
@@ -811,7 +814,7 @@ class Bench:
             free = m["vram_total"] - m["vram_used"]
             if grew > 0.75 * GB and free < cfg["vram_min_free_gb"] * GB:
                 why.append(f"other apps need VRAM (+{grew / GB:.1f} GB, {free / GB:.1f} GB free)")
-        if m["ram_avail"] < RAM_FLOOR_GB * GB:
+        if m["ram_avail"] < max(RAM_FLOOR_GB, cfg["ram_pause_gb"]) * GB:
             why.append(f"RAM nearly out ({m['ram_avail'] / GB:.1f} GB free)")
         return why
 
@@ -828,6 +831,8 @@ class Bench:
         while True:
             await asyncio.sleep(WATCH_S)
             m = self.svc.mon.get()
+            if m:
+                self.note_ram(m)
             why = self.disturbed(m) if m else []
             if not why:
                 since = None
@@ -896,13 +901,34 @@ class Bench:
             env["GLM53_NV_PREFETCH"] = "1"
         return env, ram_gib
 
+    def note_ram(self, m):
+        """The least free RAM seen while the run's server is up (recorded as ram_free_min_gb)."""
+        self.ram_low = m["ram_avail"] if self.ram_low is None else min(self.ram_low, m["ram_avail"])
+
+    async def ram_to_spare(self, r, m):
+        """(sample, GiB) of RAM cache the host can spare for run r. A run with a set RAM cache (":ram=GIB") takes it
+        whatever the PC has free: just after a stop, wait (host.ram_settle_s) for WSL to hand the stopped server's
+        memory back, so a cache that fits isn't refused, and one that doesn't is never started."""
+        svc = self.svc
+
+        def spare(m):
+            return sizing.ram_spare_gib(svc.ram_for_start(m), svc.cfg, svc.ram_overhead(r["quant"]))
+        while (spare(m) < r["ram"] and time.time() - svc.last_stop_t < svc.host.ram_settle_s
+               and not self.cancelled):
+            await asyncio.sleep(2)
+            m = await svc.fresh_sample(time.time())
+        return m, spare(m)
+
     async def _one(self, r, facts):
         svc, cfg = self.svc, self.svc.cfg
         self.emit(f"=== {r['label']}")
-        self.yielded = None
+        self.yielded, self.ram_low = None, None
         await asyncio.to_thread(svc.host.backend_stop)
         await asyncio.sleep(SETTLE_S)
         m = await svc.fresh_sample(time.time())
+        spare = None
+        if r["ram"]:
+            m, spare = await self.ram_to_spare(r, m)
         self.base = {"vram_used": m["vram_used"], "perproc_ded": m.get("perproc_ded", 0.0)}
         self.base["ext"] = svc.ext_vram(m)
         card = r["vram_gb"] is None
@@ -925,6 +951,9 @@ class Bench:
             rec["error"] = f"the {r['quant']} bpw model isn't downloaded (Setup tab)"
         elif not plan["ok"] and not r["nostage"]:
             rec["error"] = f"does not fit: {plan.get('reason')}"
+        elif spare is not None and spare < r["ram"]:
+            rec["error"] = (f"not enough free RAM for a {r['ram']} GiB RAM cache: the PC can spare "
+                            f"{max(0, spare)} GiB now")
         if rec.get("error"):
             self.emit(f"  skipped: {rec['error']}")
             rec["finished"] = True
@@ -951,7 +980,10 @@ class Bench:
                     await asyncio.sleep(2)
             rec["startup_s"] = round(time.time() - t0, 1)
             if up:
+                # as the manager does: loading left page cache in the VM that the PC counts as used
+                await asyncio.to_thread(svc.host.after_ready)
                 m2 = await svc.fresh_sample(time.time())
+                self.note_ram(m2)
                 rec["model_vram_gb"] = round((m2["vram_used"] - m["vram_used"]) / GB, 2)
                 self.emit(f"  ready in {rec['startup_s']:.0f} s: {rec['model_vram_gb']:.1f} GB VRAM, "
                           f"{rec['ram_gib']} GiB RAM cache")
@@ -979,6 +1011,9 @@ class Bench:
         elif rec.get("error") and svc.host.follower:
             rec["log_tail"] = svc.host.follower.tail(8)
         await asyncio.to_thread(svc.host.backend_stop)
+        await asyncio.to_thread(svc.host.after_stop)      # and its page cache, before the next run or the model
+        if self.ram_low is not None:
+            rec["ram_free_min_gb"] = round(self.ram_low / GB, 1)
         # the next run, or the model afterwards, can reuse this server's RAM before WSL has handed it back
         svc.last_stop_t = time.time()
         svc.freed = (svc.last_stop_t, svc.ram_for_start(m), 0.0)

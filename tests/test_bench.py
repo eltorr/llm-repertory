@@ -163,10 +163,10 @@ class FakeEngine(http.server.BaseHTTPRequestHandler):
 
 
 class FakeHost:
-    kind, follower = "linux", None
+    kind, follower, ram_settle_s = "linux", None, 0
 
     def __init__(self):
-        self.envs, self.state = [], "stopped"
+        self.envs, self.state, self.dropped = [], "stopped", []
 
     def backend_start(self, env, args):
         self.envs.append(env)
@@ -181,6 +181,12 @@ class FakeHost:
 
     def backend_status(self):
         return self.state, (4242 if self.state == "running" else None)
+
+    def after_ready(self):
+        self.dropped.append("ready")
+
+    def after_stop(self):
+        self.dropped.append("stop")
 
 
 class FakeService:
@@ -199,12 +205,13 @@ class FakeService:
         self.game = False                                   # another app has the GPU
         self.mon = types.SimpleNamespace(get=self.sample)
         self.started, self.stopped = [], []
+        self.last_stop_t, self.ram_avail = 0.0, 50e9
 
     def sample(self):
         busy = self.game() if callable(self.game) else self.game
         used = 2e9 + (FakeEngine.arena + 6e9 if self.host.state == "running" else 0)
-        return {"t": time.time(), "vram_total": 32e9, "vram_used": used, "ram_avail": 50e9, "perproc_ded": 1e9,
-                "running": {"game.exe"} if busy else set(), "ext_util": 90.0 if busy else 0.0,
+        return {"t": time.time(), "vram_total": 32e9, "vram_used": used, "ram_avail": self.ram_avail,
+                "perproc_ded": 1e9, "running": {"game.exe"} if busy else set(), "ext_util": 90.0 if busy else 0.0,
                 "ext_util_top": [["game.exe", 90]] if busy else []}
 
     def ext_vram(self, m):
@@ -347,7 +354,7 @@ class BenchTests(unittest.TestCase):
         self.assertIn("glm-3.05 bpw model isn't downloaded", b.records[0]["error"])        # its own setup step
         self.assertEqual(self.svc.host.envs, [])
         self.svc.setup.hw["engine"]["mglm305"] = "1"
-        b = self.run_bench(["glm-3.05:22:65536", "glm-3.05:16:65536:nostage:ram=30"])
+        b = self.run_bench(["glm-3.05:22:65536", "glm-3.05:16:65536:nostage:ram=24"])
         full, small = self.svc.host.envs
         self.assertEqual((full["QUANT"], full["MODEL_DIR"], full["STORE"], full["CONTEXT"]),
                          ("glm-3.05", "./model-glm-3.05", "./store/glm305.bin", "65536"))
@@ -356,7 +363,7 @@ class BenchTests(unittest.TestCase):
         self.assertEqual(full["QWEN_CHUNK"], str(plan["chunk"]))
         # the engine may lend prefill its two staging buffers (5.4 GB) and the chunk's activations
         self.assertGreater(float(full["GLM53_EC_ELASTIC_GB"]), 6.0)
-        self.assertEqual((small["QWEN_CHUNK"], small["RAM_GB"], small["GLM53_EC_STAGE_GB"]), ("1792", "30", "0"))
+        self.assertEqual((small["QWEN_CHUNK"], small["RAM_GB"], small["GLM53_EC_STAGE_GB"]), ("1792", "24", "0"))
 
     def test_engine_features_reach_the_engine(self):
         self.run_bench(["3.05:card:65536:mtp=2:cpu=2-15:prefetch"])
@@ -460,6 +467,29 @@ class BenchTests(unittest.TestCase):
         r = self.run_bench(["4.05:card:65536"]).records[0]
         self.assertIn("isn't downloaded", r["error"])
         self.assertEqual(self.svc.host.envs, [])
+
+    def test_a_ram_cache_the_pc_cant_spare_is_never_started(self):
+        # 50 GB free, less the 9 GB kept free and the server's own 9 GB: 29 GiB to spare
+        r = self.run_bench(["3.05:card:65536:ram=30"]).records[0]
+        self.assertEqual(r["error"], "not enough free RAM for a 30 GiB RAM cache: the PC can spare 29 GiB now")
+        self.assertEqual(self.svc.host.envs, [])
+
+    def test_a_set_ram_cache_waits_for_wsl_to_hand_the_last_servers_ram_back(self):
+        self.svc.host.ram_settle_s = 30
+        self.svc.last_stop_t, self.svc.ram_avail = time.time(), 30e9         # just stopped: WSL still holds it
+        threading.Timer(1.0, setattr, (self.svc, "ram_avail", 50e9)).start()
+        r = self.run_bench(["3.05:card:65536:ram=20"]).records[0]
+        self.assertIsNone(r.get("error"), r.get("error"))
+        self.assertEqual(self.svc.host.envs[0]["RAM_GB"], "20")
+
+    def test_page_cache_is_dropped_once_a_server_is_up_and_after_it_stops(self):
+        r = self.run_bench(["current"]).records[0]
+        self.assertEqual(self.svc.host.dropped, ["ready", "stop"])
+        self.assertEqual(r["ram_free_min_gb"], 50.0)                     # the least free RAM while it ran
+
+    def test_the_pc_needs_ram_back_where_the_manager_would_pause(self):
+        m = dict(self.svc.sample(), ram_avail=2.5e9)                     # ram_pause_gb: 3
+        self.assertEqual(bench.Bench(self.svc).disturbed(m), ["RAM nearly out (2.5 GB free)"])
 
     def test_a_second_run_is_compared_with_the_first(self):
         self.run_bench(["current"])

@@ -453,10 +453,10 @@ class FakeEngine(http.server.BaseHTTPRequestHandler):
 
 
 class FakeHost:
-    kind, follower = "windows-wsl", None
+    kind, follower, ram_settle_s = "windows-wsl", None, 0
 
     def __init__(self):
-        self.envs, self.state = [], "stopped"
+        self.envs, self.state, self.dropped = [], "stopped", []
 
     def backend_start(self, env, args):
         self.envs.append(env)
@@ -469,6 +469,12 @@ class FakeHost:
 
     def backend_status(self):
         return self.state, (4242 if self.state == "running" else None)
+
+    def after_ready(self):
+        self.dropped.append("ready")
+
+    def after_stop(self):
+        self.dropped.append("stop")
 
 
 class FakeService:
@@ -487,6 +493,7 @@ class FakeService:
         self.be = types.SimpleNamespace(state="running", tier="full")
         self.mon = types.SimpleNamespace(get=self.sample)
         self.started, self.stopped = [], []
+        self.last_stop_t = 0.0
 
     def sample(self):
         return {"t": time.time(), "vram_total": 34.2e9, "vram_used": 2e9 + (26e9 if self.host.state == "running"

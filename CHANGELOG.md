@@ -2,6 +2,16 @@
 
 What changed in Repertory, newest first.
 
+## 2026-11-08: Benchmarks leave the PC its RAM
+
+- **A benchmark run no longer starves the PC of RAM.** GLM 2.05's comparison run took Windows down to 1 GB free:
+  the run started a 39 GiB RAM cache right after another server had loaded, and the benchmark never dropped the page
+  cache that loading leaves in WSL (the manager does after every start and stop). Now each run drops it once its
+  server is up and after it stops, and a run with a set RAM cache (`:ram=GIB`, as curation's comparison uses) starts
+  only if the PC can spare it, waiting first for WSL to hand the last server's memory back; otherwise it is skipped
+  with the RAM it would have had. A run steps aside below the manager's `ram_pause_gb` (3 GB) instead of 1 GB, and
+  records the least free RAM while its server was up (`ram_free_min_gb`).
+
 ## 2026-11-07: GLM-5.3-Flash in the catalog
 
 - **A second model** ([docs](docs/engines.md#qwen-and-glm)): GLM-5.3-Flash at 3.05 bpw (`glm-3.05`, setup step
