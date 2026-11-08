@@ -16,8 +16,10 @@ regression  Takes the GPU, through the benchmark (repertory/bench.py, workload "
             model comes back afterwards. The fixed requests (bench.REFERENCE_CASES: a short answer, code, a tool call,
             a 73K-token document with one fact to find, and one with thinking on; greedy, each answer to its natural
             end) are compared with the reference token by token: its answers, as token ids, are teacher-forced on
-            this run, and each position's distribution must stay close to the reference's (KL_MEAN_MAX, TOP1_MIN).
-            The document's answer must name its facts. Whether the text is identical is reported, not judged. Decode
+            this run, and each position's distribution must stay close to the reference's (KL_MEAN_MAX, TIE_GAP);
+            the run's own answers, teacher-forced too, show its decode picking what the forward pass rates likeliest,
+            near ties aside (TIE_GAP, OFF_TOP_MAX). The document's answer must name its facts. Whether the text is
+            identical is reported, not judged. Decode
             and prefill may be at most DECODE_TOLERANCE and PREFILL_TOLERANCE slower than the reference's, which is
             only compared on the machine it was measured on (elsewhere the check can't pass).
             --record writes a new reference from the run (catalog/reference/MODEL.json) when there is none, or to
@@ -63,16 +65,23 @@ PREFILL_TOLERANCE = 0.10
 # - KL(reference || run), over the tokens either list holds, both renormalised over them. A token missing from one list
 #   takes that list's smallest logprob less MISSING_MARGIN: it is less likely than every token listed, by an amount the
 #   list doesn't tell; a nat below keeps it in the tail, where it moves the KL little either way;
-# - top-1 agreement: the share of positions where the run's likeliest token is the reference's (the answer's own token,
-#   unless that was a near tie between the reference's decode and its teacher-forced pass);
-# - how far the logprob of the answer's own token moved (reported only).
-# A case passes with a mean KL of at most KL_MEAN_MAX and an agreement of at least TOP1_MIN. Starting values, not yet
-# measured: a different summation order changes logits in their last bits, which should keep the KL far below 0.002
-# nats a token, while a real regression (a wrong expert, a broken kernel, damaged weights) shifts whole distributions;
-# 98% lets one position in fifty flip at a near tie (one flip in the 28-token tool call is already 96%). To be
-# calibrated on the GPU, from fresh runs of both quants against their references.
+# - flips: where the run's likeliest token isn't the reference's, how far below its own likeliest the reference rates
+#   it. A near tie may go either way; a token the reference ranked well below is another answer;
+# - top-1 agreement and how far the logprob of the answer's own token moved (reported only).
+# Teacher forcing is one forward pass over the answer: the path a prompt takes, not decode's, so a change to decode
+# alone (the CPU lane, the expert copies, MTP) doesn't show in it. The run's own greedy answer is teacher-forced too,
+# which shows how decode picked: each token's distance below the forward pass's likeliest at that position.
+# Measured on an RTX 5090 (2026-11-07, both quants, docs/catalog.md):
+# - fresh runs of one setup gave the reference's distributions exactly (KL 0, every logprob the same): the engine is
+#   deterministic, so any drift at all comes from a change;
+# - the 3.05 quant against 4.05's answers, a real but small difference: a mean KL of 0.0027-0.015 in three cases
+#   (0.00003 on the tool call, an answer the model is sure of). KL_MEAN_MAX fails a change that size;
+# - decode against the forward pass: healthy runs took its likeliest token at all but 1-3 near ties an answer, at most
+#   0.11 nat below it; with the CPU lane (a legitimate change to decode) at most 0.39 nat, 2% of positions. A pick more
+#   than TIE_GAP below, or more than OFF_TOP_MAX of an answer's positions off the top, is a broken decode.
 KL_MEAN_MAX = 0.002
-TOP1_MIN = 0.98
+TIE_GAP = 1.0
+OFF_TOP_MAX = 0.10
 MISSING_MARGIN = 1.0
 HUB = "https://huggingface.co"
 PLATFORMS = {"linux": "linux-x86_64", "windows-wsl": "windows-wsl2"}     # host kinds as the catalog names them
@@ -483,6 +492,11 @@ def sanity(cases):
     n = sum(len(c["tokens"]["answer"]) for c in short if c["name"] not in bare)
     items.append(item("tokens", bool(short) and not bare,
                       f"{n:,} answer tokens with their logprobs" if not bare else f"no token data: {', '.join(bare)}"))
+    if short and not bare:                         # a reference from a broken decode would make it the standard
+        off = [c["name"] for c in short if not decode_passes(decode_metrics(c["tokens"]))]
+        items.append(item("decode", not off, "each answer's decode took the forward pass's likeliest tokens, near "
+                                             "ties aside" if not off else f"decode strayed from the forward pass: "
+                                                                          f"{', '.join(off)}"))
     return items
 
 
@@ -510,21 +524,44 @@ def position_kl(ref_ids, ref_lps, run_ids, run_lps):
     return max(0.0, sum(math.exp(a - zp) * ((a - zp) - (b - zq)) for a, b in zip(p, q, strict=True)))
 
 
+def below_top(ids, lps, token):
+    """How far below a list's likeliest token `token` is: one the list doesn't hold, at its smallest less
+    MISSING_MARGIN, as the KL takes it."""
+    lp = dict(zip(ids, lps, strict=True)).get(token, min(lps) - MISSING_MARGIN)
+    return max(0.0, lps[0] - lp)
+
+
 def replay_metrics(tokens, replay):
     """A reference answer replayed on a run (its "replay": logprobs, top_ids, top_logprobs a position) against the
-    reference's own ("tokens"): the positions, how many agree on the likeliest token and the share, KL(reference ||
-    run) mean and max, and how far the answer token's logprob moved, mean and max."""
+    reference's own ("tokens"): the positions, how many agree on the likeliest token and the share, how far below its
+    likeliest the reference rates the run's where they differ (at most), KL(reference || run) mean and max, and how
+    far the answer token's logprob moved, mean and max."""
     n = len(tokens["answer"])
     kl = [position_kl(tokens["top_ids"][j], tokens["top_logprobs"][j], replay["top_ids"][j],
                       replay["top_logprobs"][j]) for j in range(n)]
-    agreed = sum(replay["top_ids"][j][0] == tokens["top_ids"][j][0] for j in range(n))
+    flips = [below_top(tokens["top_ids"][j], tokens["top_logprobs"][j], replay["top_ids"][j][0]) for j in range(n)
+             if replay["top_ids"][j][0] != tokens["top_ids"][j][0]]
     moved = [abs(a - b) for a, b in zip(replay["logprobs"], tokens["logprobs"], strict=True)]
-    return {"positions": n, "agreed": agreed, "top1": agreed / n, "kl_mean": sum(kl) / n, "kl_max": max(kl),
+    return {"positions": n, "agreed": n - len(flips), "top1": (n - len(flips)) / n,
+            "flip_gap_max": max(flips, default=0.0), "kl_mean": sum(kl) / n, "kl_max": max(kl),
             "logprob_delta_mean": sum(moved) / n, "logprob_delta_max": max(moved)}
 
 
 def replay_passes(m):
-    return m["kl_mean"] <= KL_MEAN_MAX and m["top1"] >= TOP1_MIN
+    return m["kl_mean"] <= KL_MEAN_MAX and m["flip_gap_max"] <= TIE_GAP
+
+
+def decode_metrics(tokens):
+    """How a run's greedy decode picked, from its own answer teacher-forced ("tokens": the forward pass's view): the
+    positions where it didn't take the forward pass's likeliest token, their share, and how far below it the token it
+    took was, at most."""
+    gaps = [max(0.0, row[0] - own) for row, own in zip(tokens["top_logprobs"], tokens["logprobs"], strict=True)]
+    off = sum(g > 0 for g in gaps)
+    return {"decode_off": off, "decode_off_share": off / len(gaps), "decode_gap_max": max(gaps)}
+
+
+def decode_passes(d):
+    return d["decode_gap_max"] <= TIE_GAP and d["decode_off_share"] <= OFF_TOP_MAX
 
 
 def replay_case(ref_case, case, numbers):
@@ -534,14 +571,22 @@ def replay_case(ref_case, case, numbers):
     name, tokens, replay = ref_case["name"], ref_case["tokens"], case.get("replay") or {}
     if not complete_tokens(dict(replay, prompt=tokens["prompt"], answer=tokens["answer"])):
         return None, "the reference's answer wasn't replayed in this run"
-    m = replay_metrics(tokens, replay)
-    numbers.update({f"{name}_top1": round(m["top1"], 4),
-                    **{f"{name}_{k}": float(f"{m[k]:.3g}") for k in ("kl_mean", "kl_max", "logprob_delta_mean",
-                                                                     "logprob_delta_max")}})
-    ok = replay_passes(m)
-    detail = (f"top-1 agreement {m['agreed']}/{m['positions']} ({m['top1']:.1%}, at least {TOP1_MIN:.0%}), KL mean "
-              f"{m['kl_mean']:.2g} (at most {KL_MEAN_MAX:g}), max {m['kl_max']:.2g}; the answer token's logprob moved "
-              f"{m['logprob_delta_mean']:.2g} on average, at most {m['logprob_delta_max']:.2g}")
+    if not complete_tokens(case.get("tokens")):
+        return None, "this run's own answer wasn't teacher-forced, so its decode can't be checked"
+    m, d = replay_metrics(tokens, replay), decode_metrics(case["tokens"])
+    numbers.update({f"{name}_top1": round(m["top1"], 4), f"{name}_decode_off_share": round(d["decode_off_share"], 4),
+                    **{f"{name}_{k}": float(f"{v:.3g}") for k, v in m.items()
+                       if k in ("flip_gap_max", "kl_mean", "kl_max", "logprob_delta_mean", "logprob_delta_max")},
+                    f"{name}_decode_gap_max": float(f"{d['decode_gap_max']:.3g}")})
+    ok = replay_passes(m) and decode_passes(d)
+    flips = (f"{m['positions'] - m['agreed']} flipped, at most {m['flip_gap_max']:.2g} nat below the reference's "
+             f"likeliest (at most {TIE_GAP:g})" if m["agreed"] < m["positions"] else "none flipped")
+    detail = (f"KL mean {m['kl_mean']:.2g} (at most {KL_MEAN_MAX:g}), max {m['kl_max']:.2g}; top-1 agreement "
+              f"{m['agreed']}/{m['positions']}, {flips}; decode took the forward pass's likeliest token at "
+              f"{len(case['tokens']['answer']) - d['decode_off']}/{len(case['tokens']['answer'])} positions (off at "
+              f"most {OFF_TOP_MAX:.0%}), the others at most {d['decode_gap_max']:.2g} nat below it (at most "
+              f"{TIE_GAP:g}); the answer token's logprob moved {m['logprob_delta_mean']:.2g} on average, at most "
+              f"{m['logprob_delta_max']:.2g}")
     prompt = (case.get("tokens") or {}).get("prompt")
     if prompt is not None and prompt != tokens["prompt"]:
         ok, detail = False, f"its prompt's tokens differ from the reference's (chat template or tokenizer); {detail}"
@@ -561,7 +606,7 @@ def compare(ref, rec):
     the document, its facts); whether its text is identical is said, not judged."""
     now = {c["name"]: c for c in (rec.get("reference") or {}).get("cases") or []}
     items, same = [], 0
-    numbers = {"kl_mean_limit": KL_MEAN_MAX, "top1_limit": TOP1_MIN}
+    numbers = {"kl_mean_limit": KL_MEAN_MAX, "tie_gap_limit": TIE_GAP, "off_top_limit": OFF_TOP_MAX}
     for c in ref["cases"]:
         n = now.get(c["name"])
         if n is None:

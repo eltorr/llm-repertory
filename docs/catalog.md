@@ -83,13 +83,29 @@ They are compared with the model's reference, `catalog/reference/<model-id>.json
   reference: each answer but the document's is fed to the model as the reference's own token ids after its prompt
   (teacher forcing: one forward pass, through the engine's `/generate`), and at each position the model's 20
   likeliest tokens are compared with the reference's. Per answer:
-  - top-1 agreement, the share of positions where this run's likeliest token is the reference's: at least 98%;
   - KL(reference || run) at each position, over the tokens either list holds (one missing from a list takes that
     list's smallest logprob less one nat), both renormalized: a mean of at most 0.002;
-  - how far the logprob of the answer's own token moved, on average and at most: reported.
+  - where this run's likeliest token isn't the reference's, the reference must rate it within 1 nat of its own
+    likeliest: a near tie that went the other way, not another answer;
+  - top-1 agreement and how far the answer token's logprob moved: reported.
+- **Decode, against the forward pass.** Teacher forcing takes the path a prompt takes, so a change to decode alone
+  (the CPU lane, the expert copies, MTP) doesn't show in it. Each run's own greedy answer is teacher-forced too: at
+  each position, decode should have taken the token the forward pass rates likeliest, or one within 1 nat of it,
+  and may be off it at no more than 10% of an answer's positions. A recorded reference must pass this too.
 
-  A prompt whose token ids differ from the reference's (a new chat template or tokenizer) fails. The two limits are
-  starting values, to be calibrated on the GPU from fresh runs of both quants.
+  A prompt whose token ids differ from the reference's (a new chat template or tokenizer) fails.
+
+  How the limits were set, on an RTX 5090 (2026-11-07):
+
+  | Run | Mean KL (short, code, tool, reasoning) | Decode off the forward pass's top |
+  |---|---|---|
+  | Fresh runs of the same setup (two per quant) | 0, 0, 0, 0 | at most 2.5% of positions, 0.11 nat |
+  | 3.05 with the CPU lane, against 3.05's reference | 0, 0, 0, 0 | at most 2% of positions, 0.39 nat |
+  | 3.05 against 4.05's answers (a different quant) | 0.015, 0.0027, 0.00003, 0.0056 | (3.05's own: as above) |
+
+  The engine is deterministic: the same setup gives the same distributions to the last digit. A whole-quant
+  difference shows a mean KL above 0.002 in three of the four answers (the tool call is one the model is sure of).
+  The CPU lane changes what decode picks at near ties, never by more than 0.39 nat.
 - **The document's answer** must name the technician and the code word. It isn't replayed: one forward pass over
   its 73K tokens would need far more memory than a run has spare.
 - Whether each answer is identical (text, reasoning, tool calls, finish reason, token counts) is reported, and

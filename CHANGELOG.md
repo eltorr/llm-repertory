@@ -33,12 +33,15 @@ What changed in Repertory, newest first.
 - **Curation compares tokens, not text:** exact text fails any change that moves logits in their last bits (the CPU
   lane, a kernel adding experts in another order, a new exllamav3), since a near tie then flips a greedy answer, and
   it can't tell that from a real regression. The regression check now teacher-forces the reference's own answers,
-  as token ids, on the new run
-  and compares each position's 20 likeliest tokens with the reference's: per answer, at least 98% top-1 agreement
-  and a mean KL of at most 0.002 (starting values, to be calibrated on the GPU). The document's answer must name its
-  facts; identical text is reported only. References gain the token data; one recorded before has to be recorded
-  again (until then the check is untested). The engine gains `/prepare` (a chat request's prompt as token ids);
-  `/generate` returns a whole answer's ids, and teacher forcing each token's own logprob.
+  as token ids, on the new run and compares each position's 20 likeliest tokens with the reference's: a mean KL of
+  at most 0.002, and a likeliest token that changed must have been a near tie (within 1 nat). Teacher forcing takes
+  the prompt's path, not decode's, so each run's own answer is teacher-forced too, and decode must have taken the
+  forward pass's likeliest token, near ties within 1 nat aside, at 90% of positions or more. Calibrated on the GPU
+  ([docs](docs/catalog.md)): fresh runs reproduce the reference exactly (KL 0), the CPU lane passes (its decode strays
+  at most 0.39 nat), and 3.05 against 4.05's answers fails. The document's answer must name its facts; identical text
+  is reported only. References gain the token data; one recorded before has to be recorded again (until then the
+  check is untested). The engine gains `/prepare` (a chat request's prompt as token ids); `/generate` returns a whole
+  answer's ids, and teacher forcing each token's own logprob.
 
 ## 2026-11-07: measured
 

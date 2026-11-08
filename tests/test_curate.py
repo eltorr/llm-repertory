@@ -559,9 +559,13 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(r["numbers"]["identical"], "5/5")
         self.assertEqual((r["numbers"]["short_top1"], r["numbers"]["short_kl_mean"], r["numbers"]["code_kl_max"]),
                          (1.0, 0.0, 0.0))
-        self.assertEqual((r["numbers"]["kl_mean_limit"], r["numbers"]["top1_limit"]), (0.002, 0.98))
+        self.assertEqual((r["numbers"]["kl_mean_limit"], r["numbers"]["tie_gap_limit"], r["numbers"]["off_top_limit"]),
+                         (0.002, 1.0, 0.1))
+        self.assertEqual((r["numbers"]["short_decode_gap_max"], r["numbers"]["short_decode_off_share"]), (0.0, 0.0))
         items = by_name(r)
         self.assertIn("top-1 agreement", items["short"]["detail"])
+        self.assertIn("none flipped", items["short"]["detail"])
+        self.assertIn("decode took the forward pass's likeliest token at", items["short"]["detail"])
         self.assertIn("text identical", items["short"]["detail"])
         self.assertIn("names Ilsa Varga and PERIWINKLE", items["document"]["detail"])
         self.assertEqual(r["summary"], "answers within the tolerance (5/5 identical as text), speed within the "
@@ -747,7 +751,8 @@ class SpeedTests(unittest.TestCase):
 
     def test_the_tolerances(self):
         self.assertEqual((curate.DECODE_TOLERANCE, curate.PREFILL_TOLERANCE), (0.15, 0.10))
-        self.assertEqual((curate.KL_MEAN_MAX, curate.TOP1_MIN, curate.MISSING_MARGIN), (0.002, 0.98, 1.0))
+        self.assertEqual((curate.KL_MEAN_MAX, curate.TIE_GAP, curate.OFF_TOP_MAX, curate.MISSING_MARGIN),
+                         (0.002, 1.0, 0.10, 1.0))
 
 
 class ReplayTests(unittest.TestCase):
@@ -777,7 +782,7 @@ class ReplayTests(unittest.TestCase):
         run["logprobs"][10] = -0.702                                   # the reference's token, now second
         m = curate.replay_metrics(t, run)
         self.assertEqual(m["agreed"], 59)
-        self.assertGreaterEqual(m["top1"], curate.TOP1_MIN)
+        self.assertAlmostEqual(m["flip_gap_max"], 0.001, places=6)      # the reference had them a thousandth apart
         self.assertLess(m["kl_mean"], 1e-4)
         self.assertGreater(m["kl_max"], 0.0)
         self.assertAlmostEqual(m["logprob_delta_max"], 0.002, places=6)
@@ -799,7 +804,47 @@ class ReplayTests(unittest.TestCase):
             wrong["top_ids"][j][:2] = wrong["top_ids"][j][1::-1]
         m = curate.replay_metrics(t, wrong)
         self.assertEqual(m["agreed"], 54)
+        self.assertGreater(m["flip_gap_max"], 3 * curate.TIE_GAP)        # a token the reference ranked far below
         self.assertFalse(curate.replay_passes(m))
+
+    def test_a_single_flip_far_from_a_tie_fails_even_in_a_long_answer(self):
+        t = made_up(300)
+        run = replay_of(t)
+        run["top_ids"][150][:2] = run["top_ids"][150][1::-1]           # one position of 300, 3+ nats from a tie
+        m = curate.replay_metrics(t, run)
+        self.assertGreater(m["top1"], 0.99)
+        self.assertFalse(curate.replay_passes(m))
+
+    def test_decode_that_takes_what_the_forward_pass_rates_likeliest_passes(self):
+        t = made_up()
+        self.assertEqual(curate.decode_metrics(t), {"decode_off": 0, "decode_off_share": 0.0, "decode_gap_max": 0.0})
+        t["logprobs"][5] = round(t["top_logprobs"][5][0] - 0.39, 3)    # as the CPU lane's largest: a near tie
+        d = curate.decode_metrics(t)
+        self.assertEqual(d["decode_off"], 1)
+        self.assertTrue(curate.decode_passes(d))
+
+    def test_a_decode_that_strays_from_the_forward_pass_fails(self):
+        t = made_up()
+        t["logprobs"][5] = t["top_logprobs"][5][3]                      # decode took the fourth likeliest, nats below
+        self.assertFalse(curate.decode_passes(curate.decode_metrics(t)))
+        t = made_up()
+        for j in range(0, 60, 8):                                     # small slips, but at one position in eight
+            t["logprobs"][j] = round(t["top_logprobs"][j][0] - 0.2, 3)
+        d = curate.decode_metrics(t)
+        self.assertLess(d["decode_gap_max"], curate.TIE_GAP)
+        self.assertFalse(curate.decode_passes(d))
+
+    def test_a_run_whose_decode_strays_fails_its_case(self):
+        t = made_up(8)
+        own = copy.deepcopy(t)
+        own["logprobs"][2] = own["top_logprobs"][2][5]
+        numbers = {}
+        ok, detail = curate.replay_case({"name": "short", "tokens": t}, {"tokens": own, "replay": replay_of(t)},
+                                        numbers)
+        self.assertFalse(ok)
+        self.assertIn("decode took the forward pass's likeliest token at 7/8 positions", detail)
+        self.assertGreater(numbers["short_decode_gap_max"], curate.TIE_GAP)
+        self.assertEqual(numbers["short_kl_mean"], 0.0)                  # the forward pass itself is unchanged
 
     def test_a_token_missing_from_one_list(self):
         p, q = [math.log(0.9), math.log(0.1)], [math.log(0.8), math.log(0.2)]
