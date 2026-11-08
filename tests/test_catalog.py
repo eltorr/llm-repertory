@@ -27,7 +27,7 @@ class CatalogFileTests(unittest.TestCase):
     def test_the_catalog_validates(self):
         self.assertEqual(catalog.check(DATA, SCHEMA), [])
         cat = catalog.load()
-        self.assertEqual([m["quant"] for m in cat.models_for("exl3-offload")], ["3.05", "4.05", "glm-3.05"])
+        self.assertEqual([m["quant"] for m in cat.models_for("exl3-offload")], ["3.05", "4.05", "glm-3.05", "glm-2.05"])
 
     def test_the_file_is_kept_as_json_dumps_writes_it(self):
         # save_curation rewrites the file: it must come back byte for byte, so only the curation changes in a diff

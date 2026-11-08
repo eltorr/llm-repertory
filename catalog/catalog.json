@@ -926,6 +926,84 @@
           }
         }
       }
+    },
+    {
+      "id": "glm-5.3-flash-exl3-2.05",
+      "family": "glm-5.3-flash",
+      "quant": "glm-2.05",
+      "label": "GLM-5.3-Flash 2.05 bpw (lighter)",
+      "source": {
+        "huggingface": "turboderp/GLM-5.3-Flash-exl3",
+        "branch": "2.05bpw",
+        "revision": "51058cd551c7e570d87bd32a4adee720edce2349",
+        "verify": "hub-hashes"
+      },
+      "format": "exl3",
+      "bpw": 2.05,
+      "engines": [
+        "exl3-offload"
+      ],
+      "facts": {
+        "experts_per_layer": 288,
+        "moe_layers": 42,
+        "experts_per_token": 8,
+        "expert_bytes": 6291456,
+        "store_record_bytes": 6328320,
+        "fixed_vram_bytes": 8650000000,
+        "kv_bytes_per_token": {
+          "2": 8096,
+          "4": 9504,
+          "8": 12320,
+          "16": 17600
+        },
+        "prefill_act_bytes_per_token": 600000,
+        "max_context": 1048576,
+        "mtp": true
+      },
+      "disk": {
+        "download_gb": 85.2,
+        "prepared_gb": 78.4
+      },
+      "paths": {
+        "model_dir": "model-glm-2.05",
+        "store": "store/glm205.bin"
+      },
+      "prepare": [
+        {
+          "id": "download",
+          "title": "Download and check every file",
+          "run": [
+            ".venv/bin/python",
+            "engines/exl3_offload/download.py",
+            "--model-dir",
+            "./model-glm-2.05",
+            "--repo",
+            "turboderp/GLM-5.3-Flash-exl3",
+            "--sha",
+            "51058cd551c7e570d87bd32a4adee720edce2349",
+            "--branch",
+            "2.05bpw"
+          ]
+        },
+        {
+          "id": "pack",
+          "title": "Pack the expert store (with the MTP layer)",
+          "run": [
+            ".venv/bin/python",
+            "glm53-flash-offload/scripts/pack_glm53_store.py",
+            "pack",
+            "--model",
+            "./model-glm-2.05",
+            "--out-dir",
+            "./store",
+            "--name",
+            "glm205"
+          ],
+          "creates": "store/glm205.bin"
+        }
+      ],
+      "cpu_execution": "experimental",
+      "offer_untested": false
     }
   ]
 }

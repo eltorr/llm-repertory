@@ -598,10 +598,10 @@ class RunSpecTests(unittest.TestCase):
         r = bench.parse_run("glm-3.05:24:65536:nostage:ram=40")
         self.assertEqual((r["vram_gb"], r["nostage"], r["ram"], r["label"]),
                          (24.0, True, 40, "glm-3.05-24gb-64k-nostage-ram40"))
-        # "quants" is the configured model's own: GLM has one, Qwen two
+        # "quants" is the configured model's own family: GLM's two, Qwen's two
         glm = dict(self.cfg, quant="glm-3.05", context=131072)
         self.assertEqual([x["label"] for x in bench.expand(["current", "quants"], glm)],
-                         ["glm-3.05-card-128k", "glm-3.05-card-128k"])
+                         ["glm-3.05-card-128k", "glm-3.05-card-128k", "glm-2.05-card-128k"])
         self.assertEqual(bench.family_quants("4.05"), ["3.05", "4.05"])
         with self.assertRaises(ValueError):
             bench.parse_run("glm-4.05:card:65536")

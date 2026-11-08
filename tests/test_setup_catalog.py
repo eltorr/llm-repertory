@@ -49,7 +49,7 @@ class ModelStepTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         steps = {s["id"]: s for s in setup_mod.model_steps()}
-        self.assertEqual(list(steps), ["m305", "m405", "mglm305"])
+        self.assertEqual(list(steps), ["m305", "m405", "mglm305", "mglm205"])
         s = steps["m305"]
         self.assertEqual(s["title"], "Model: 3.05 bpw (fastest)")
         self.assertEqual(s["desc"], "~85 GB download + ~47 GB expert store. Resumable.")
@@ -70,13 +70,15 @@ class ModelStepTests(unittest.TestCase):
                          ("glm-5.3-flash-exl3-3.05", "glm-3.05", "untested", False))
         self.assertEqual([x["id"] for x in setup_for().steps],
                          ["driver", "base", "engine", "build", "m305", "m405"])          # Linux; GLM isn't curated
-        self.assertEqual([x["id"] for x in setup_for({"offer_uncurated": True}).steps][-1], "mglm305")
+        self.assertEqual([x["id"] for x in setup_for({"offer_uncurated": True}).steps][-2:],
+                         ["mglm305", "mglm205"])
         self.assertEqual([x["id"] for x in setup_for({"quant": "glm-3.05"}).steps][-1], "mglm305")   # the chosen one
         self.assertEqual(setup_for().step("mglm305")["args"][0], "glm-3.05")          # runnable by name either way
 
     def test_check_sh_is_told_where_each_model_lives(self):
         self.assertEqual(setup_mod.model_specs(), ["m305=model:store/qwen.bin", "m405=model-4.05:store/qwen405.bin",
-                                                   "mglm305=model-glm-3.05:store/glm305.bin"])
+                                                   "mglm305=model-glm-3.05:store/glm305.bin",
+                                                   "mglm205=model-glm-2.05:store/glm205.bin"])
 
     def test_a_model_that_failed_curation_is_hidden_unless_installed_chosen_or_asked_for(self):
         cat = with_curation(**{"3.05": "curated", "4.05": "failed"})
@@ -100,7 +102,8 @@ class ModelStepTests(unittest.TestCase):
         self.assertEqual((st["m305"], st["m405"]), ("ok", "missing"))
         st = setup_for().statuses({"gpus": [{}], "driver": {}, "engine": {"error": "no WSL"}})
         self.assertEqual((st["m305"], st["m405"]), ("unknown", "unknown"))
-        self.assertEqual(hardware.installed({"m305": "1"}), {"3.05": True, "4.05": False, "glm-3.05": False})
+        self.assertEqual(hardware.installed({"m305": "1"}), {"3.05": True, "4.05": False, "glm-3.05": False,
+                                                                 "glm-2.05": False})
         self.assertEqual(hardware.installed({"mglm305": "1"})["glm-3.05"], True)
 
     def test_running_a_model_step_passes_the_catalogs_values_and_the_legacy_folder(self):
@@ -152,7 +155,7 @@ class DashboardTests(unittest.TestCase):
             svc.cfg["quant"] = "3.05"
             self.assertEqual([c["quant"] for c in Service.model_choices(svc)], ["3.05", "4.05"])  # it's the chosen one
             svc.cfg.update(quant="4.05", offer_uncurated=True)
-            self.assertEqual([c["offered"] for c in Service.model_choices(svc)], [False, True, False])
+            self.assertEqual([c["offered"] for c in Service.model_choices(svc)], [False, True, False, False])
 
     def test_the_baseline_keeps_glm_and_its_context(self):
         # the presets are Qwen's: on GLM, applying the baseline takes its RAM thresholds, not Qwen's model
