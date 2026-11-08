@@ -75,8 +75,25 @@ After a warm-up it sends five fixed requests, greedy, each answer to its natural
 - a short answer, code, a tool call, a 73K-token document with one fact to find, and a short answer with thinking
   on.
 
-They must match the model's reference, `catalog/reference/<model-id>.json`:
-- **Answers, exactly:** text, reasoning, tool calls, finish reasons and token counts.
+They are compared with the model's reference, `catalog/reference/<model-id>.json`:
+- **Answers, token by token.** Exact text would be too strict: the engine's MoE path can add the experts' outputs
+  in an order that follows where they sit (VRAM or RAM), so the last bits of one run differ from the next, and where
+  two tokens are nearly tied a greedy answer can flip and go its own way. On the 3.05 bpw quant, two fresh runs
+  minutes apart gave different text in three of the five cases. So after the timed requests, the run replays the
+  reference: each answer but the document's is fed to the model as the reference's own token ids after its prompt
+  (teacher forcing: one forward pass, through the engine's `/generate`), and at each position the model's 20
+  likeliest tokens are compared with the reference's. Per answer:
+  - top-1 agreement, the share of positions where this run's likeliest token is the reference's: at least 98%;
+  - KL(reference || run) at each position, over the tokens either list holds (one missing from a list takes that
+    list's smallest logprob less one nat), both renormalized: a mean of at most 0.002;
+  - how far the logprob of the answer's own token moved, on average and at most: reported.
+
+  A prompt whose token ids differ from the reference's (a new chat template or tokenizer) fails. The two limits are
+  starting values, to be calibrated on the GPU from fresh runs of both quants.
+- **The document's answer** must name the technician and the code word. It isn't replayed: one forward pass over
+  its 73K tokens would need far more memory than a run has spare.
+- Whether each answer is identical (text, reasoning, tool calls, finish reason, token counts) is reported, and
+  decides nothing.
 - **Speed:** decode (over all the answers) at most 15% slower than the reference's, prefill (the document) at
   most 10%. Faster always passes. The margins come from the recorded runs:
   - decode: the trials of one whole-card run were up to 9.6% apart, the first one colder, though the medians of
@@ -92,16 +109,22 @@ A run uses the reference's context and RAM cache, so it starts the same configur
 
 **Recording a reference** (`--record`): when there is none, or to accept a change, such as new answers after an
 engine update you have looked at. The answers must be fit to be a reference: each ends by itself, the tool call is
-the weather lookup for Lisbon, the document's fact is found, and the last one reasons. The reference keeps the
-answers, the speeds, the run's configuration, the engine commit and the machine. Recording doesn't pass the check:
-the next run compares a fresh start against it.
+the weather lookup for Lisbon, the document's facts are found, the last one reasons, and the others came with their
+token data. The reference keeps the answers, the speeds, the run's configuration, the engine commit and the
+machine; for each answer but the document's, its prompt and answer as token ids (from the engine's `/prepare`, which
+builds the prompt as the chat routes do, and a greedy `/generate` to the answer's natural end) with each position's
+logprobs, the answer token's and the 20 likeliest, to three decimals, a line a position; for the document, the facts
+its answer must name. Recording doesn't pass the check: the next run compares a fresh start against it. A reference
+recorded before the token comparison has no token data: the check says it has to be recorded again, and stays
+undecided (`untested`) until it is, without taking the GPU.
 
 **The result** goes into the entry's `curation`:
 - `status`: `curated` (both checks passed), `failed` (one failed) or `untested` (one not run or undecided, or a
   reference just recorded);
 - the date, the machine (GPU, VRAM, RAM, platform; no host names) and the engine commit;
-- each check's items, one per thing checked, and its numbers: speeds and their change, the tolerances, the run's
-  configuration, and the plan for this PC.
+- each check's items, one per thing checked, and its numbers: each answer's agreement, KL and logprob change
+  (`short_top1`, `short_kl_mean`...), how many answers were identical, speeds and their change, the limits and
+  tolerances, the run's configuration, and the plan for this PC.
 
 A check that isn't run keeps its earlier result.
 

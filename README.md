@@ -93,7 +93,8 @@ many more models; the offload engine runs Qwen3.8-Flash-Next and GLM-5.3-Flash. 
 [engines and models](docs/engines.md).
 
 A catalog entry is offered once it passes curation (`repertory curate`): a compatibility check that needs no GPU,
-and a regression check on the GPU that must reproduce its recorded answers exactly at the recorded speed. See
+and a regression check on the GPU that replays its recorded answers token by token (each position's likeliest
+tokens must stay close to the recorded ones) at the recorded speed. See
 [the catalog](docs/catalog.md).
 
 ## The dashboard

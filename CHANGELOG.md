@@ -26,6 +26,13 @@ What changed in Repertory, newest first.
 - **Checking a download** drops what it read from the page cache, as downloading already did: hashing a 100 GB
   model no longer fills RAM next to a running model. The files check ignores the resume files QwenFlash's
   downloader left beside each file (`FILE.http-state.json`).
+- **Curation compares tokens, not text:** a near tie can flip a greedy answer when the MoE path adds the experts in
+  another order, so the regression check now teacher-forces the reference's own answers, as token ids, on the new run
+  and compares each position's 20 likeliest tokens with the reference's: per answer, at least 98% top-1 agreement
+  and a mean KL of at most 0.002 (starting values, to be calibrated on the GPU). The document's answer must name its
+  facts; identical text is reported only. References gain the token data; one recorded before has to be recorded
+  again (until then the check is untested). The engine gains `/prepare` (a chat request's prompt as token ids);
+  `/generate` returns a whole answer's ids, and teacher forcing each token's own logprob.
 
 ## 2026-11-07: measured
 
