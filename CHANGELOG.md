@@ -22,6 +22,11 @@ What changed in Repertory, newest first.
   configured model's quants), run.sh by hand for any catalog quant, and curation's architecture check (GLM's
   `n_routed_experts`, the MoE layers and the MTP layer must match the entry). The preset rule and the benchmark's
   `matrix` stay Qwen's; with GLM configured, the baseline recommendation keeps GLM and its context.
+- **A model whose host doesn't answer is no longer shown as running.** When WSL went down (its disk's drive full),
+  the dashboard said running while nothing answered: a stop that couldn't reach WSL put the state back to running,
+  and the alive check skipped every check it couldn't answer. Now a stop that can't reach the host leaves the model
+  in error with "can't reach the model server's host", and a running model whose host misses its checks for a
+  minute is taken as lost (the error, then the usual recovery). One missed check still passes.
 
 ## 2026-11-07: the catalog drives the platform; curation
 

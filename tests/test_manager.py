@@ -113,6 +113,58 @@ class StopTests(unittest.TestCase):
         self.assertEqual(state, "running")
         self.assertEqual(events[-1][0], "error")
 
+    def test_a_host_that_doesnt_answer_is_an_error_not_running(self):
+        state, events, stops = self.run_stop(["unknown", "unknown", "unknown"])     # WSL down: can't tell
+        self.assertEqual(state, "error")
+        self.assertEqual(events[-1][0], "error")
+        self.assertIn("can't reach the model server's host", events[-1][1])
+
+
+class AliveTests(unittest.TestCase):
+    """A running model whose host stops answering (WSL down) is taken as lost after UNREACHABLE_S, not shown as
+    running; one missed check isn't enough."""
+
+    def svc(self, statuses):
+        import types
+        from repertory import service
+        be = service.Backend()
+        be.set("running")
+        be.pid, be.tier = 123, "full"
+        s = types.SimpleNamespace(be=be, task=None, unreachable_since=None, events=[], spawned=[], follower=None,
+                                  host=types.SimpleNamespace(backend_status=lambda: statuses.pop(0), follower=None))
+        s.event = lambda k, m: s.events.append((k, m))
+        s.spawn = lambda coro: (s.spawned.append(coro), coro.close())
+        s._recover = lambda *a: service.asyncio.sleep(0)
+        s.check_alive = types.MethodType(service.Service.check_alive, s)
+        return s
+
+    def check(self, s, at):
+        import asyncio
+        from unittest import mock
+        from repertory import service
+        with mock.patch.object(service.time, "time", lambda: at):
+            asyncio.run(s.check_alive())
+
+    def test_a_minute_without_an_answer_loses_the_model(self):
+        from repertory import service
+        s = self.svc([("unknown", "E_FAIL")] * 3)
+        self.check(s, 1000.0)
+        self.check(s, 1000.0 + service.UNREACHABLE_S - 1)
+        self.assertEqual((s.events, s.spawned), ([], []))                  # a while without an answer: wait
+        self.check(s, 1000.0 + service.UNREACHABLE_S)
+        self.assertEqual(len(s.spawned), 1)                                # then recover, and say why
+        self.assertIn("can't reach the model server's host", s.be.error)
+        self.assertIn("E_FAIL", s.events[-1][1])
+
+    def test_an_answer_in_between_starts_the_count_again(self):
+        from repertory import service
+        s = self.svc([("unknown", "x"), ("running", 123), ("unknown", "x")])
+        self.check(s, 1000.0)
+        self.check(s, 1030.0)                                              # answered: the model is fine
+        self.check(s, 1000.0 + service.UNREACHABLE_S + 5)                  # a fresh miss, not a minute of them
+        self.assertEqual(s.spawned, [])
+        self.assertEqual(s.unreachable_since, 1000.0 + service.UNREACHABLE_S + 5)
+
 
 class RamTuningTests(unittest.TestCase):
     """How the RAM cache is sized: through WSL's slow hand-back after a stop, and after running short."""

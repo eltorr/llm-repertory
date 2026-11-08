@@ -45,6 +45,9 @@ RAM_GRACE_S = 90                 # after a start, page cache from loading takes 
 FREED_S = 300                    # how long a stopped server's RAM counts as reusable for the next start (WSL)
 RAM_GROW_MARGIN_GB = 1.0         # a RAM cache growing in the background stops below lean's threshold plus this
 SOFT_CAP_S = 3600                # how long a RAM cache that ran short caps the next full starts
+# How long the model's host may not answer (WSL down: out of disk or memory, or a crash) before a running model is
+# taken as lost; checks run every 10 s, and a busy WSL can miss one
+UNREACHABLE_S = 60
 UI_FILE = REPO / "repertory" / "ui" / "index.html"
 SIGNIN_FILE = REPO / "repertory" / "ui" / "signin.html"   # the root without the private link
 PAGES = ("/", "/_switcher", "/_switcher/", "/_switcher/index.html")
@@ -131,6 +134,7 @@ class Service:
         self.metrics = collections.deque(maxlen=200)
         self._last_hist_t = 0
         self._last_alive_check = 0.0
+        self.unreachable_since = None    # when the host first stopped answering the alive check
         self.recover = {"attempts": 0, "window_start": 0.0, "next_at": None, "tier": None}
         self.learned = config.load_json("learned.json", {})
         self.quit = None
@@ -527,6 +531,13 @@ class Service:
             log.warning("model server %s after a stop (%s); retrying", st, str(out)[:200])
             await asyncio.sleep(5 * (attempt + 1))
         else:
+            if st == "unknown":
+                # the host doesn't answer (WSL down): whether the server is still there can't be told, so it isn't
+                # shown as running; the next start stops whatever is left first
+                self.be.error = f"can't reach the model server's host: {str(out)[:200] or 'no answer'}"
+                self.be.set("error")
+                self.event("error", self.be.error.replace("\n", " | "))
+                return
             self.be.set("running")                  # still there: keep tracking it, and the next tick tries again
             self.event("error", f"could not stop the model server ({str(out)[:160] or st}); will try again")
             return
@@ -741,15 +752,27 @@ class Service:
 
     async def check_alive(self):
         st, pid = await asyncio.to_thread(self.host.backend_status)
+        if st != "unknown" or self.be.state != "running":
+            self.unreachable_since = None              # an answer, or nothing to lose: the next miss counts afresh
         if self.be.state != "running" or (self.task and not self.task.done()):
             return
         if st == "running" and pid == self.be.pid:
             return
+        tier, budget, ram = self.be.tier, self.be.budget, self.be.ram_gib
         if st == "unknown":
+            # the host doesn't answer (for unknown, pid holds why): a missed check is fine, a minute of them isn't
+            now = time.time()
+            self.unreachable_since = self.unreachable_since or now
+            if now - self.unreachable_since < UNREACHABLE_S:
+                return
+            self.unreachable_since = None
+            self.be.error = (f"can't reach the model server's host for {UNREACHABLE_S} s: "
+                             f"{str(pid or 'no answer')[:300]}")
+            self.event("error", self.be.error.replace("\n", " | ")[:600])
+            self.spawn(self._recover(tier, "unreachable", budget, ram))
             return
         tail = self.host.follower.tail(30) if self.host.follower else ""
         kind = self.classify(tail)
-        tier, budget, ram = self.be.tier, self.be.budget, self.be.ram_gib
         self.be.error = f"model server exited unexpectedly ({kind}): {tail[-400:]}"
         self.event("error", self.be.error.replace("\n", " | ")[:600])
         self.spawn(self._recover(tier, kind, budget, ram))
