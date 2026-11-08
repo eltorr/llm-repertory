@@ -173,6 +173,18 @@ class SaveTests(unittest.TestCase):
             with self.assertRaises(KeyError):
                 catalog.save_curation("nope", cur, p)
 
+    def test_flat_puts_each_list_of_numbers_on_one_line(self):
+        data = {"top": [[1, 2.5, -3e-05], [4]], "text": "x = [0,1]\nnext", "none": [], "objects": [{"k": 1}]}
+        text = catalog.flat_numbers(json.dumps(data, indent=1))
+        self.assertEqual(json.loads(text), data)
+        self.assertIn('"top": [\n  [1, 2.5, -3e-05],\n  [4]\n ]', text)
+        self.assertIn('"x = [0,1]\\nnext"', text)                     # a string is never touched
+        self.assertIn('"objects": [\n  {', text)
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "ref.json"
+            catalog.write_json(p, data, flat=True)
+            self.assertEqual(p.read_bytes(), (text + "\n").encode())
+
 
 class SizingTests(unittest.TestCase):
     def test_sizings_numbers_are_the_catalogs(self):

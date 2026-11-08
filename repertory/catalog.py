@@ -248,13 +248,24 @@ def save_curation(model_id, curation, path=None, schema_path=None):
     write_json(path, data, indent=2)
 
 
-def write_json(path, data, indent=1):
-    """JSON as the repository keeps it: UTF-8, LF, a final newline; replaced in one step."""
+def write_json(path, data, indent=1, flat=False):
+    """JSON as the repository keeps it: UTF-8, LF, a final newline; replaced in one step. flat: each list of numbers
+    on one line (curation's token data)."""
     path = Path(path)
     tmp = path.with_name(path.name + ".tmp")
+    text = json.dumps(data, indent=indent, ensure_ascii=False)
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps(data, indent=indent, ensure_ascii=False) + "\n")
+        f.write((flat_numbers(text) if flat else text) + "\n")
     os.replace(tmp, path)
+
+
+# an indented list of numbers only: it starts with a line break, which a JSON string can't hold, so never inside one
+NUMBER_LIST = re.compile(r"\[(\n[-+0-9.eE,\s]*)\]")
+
+
+def flat_numbers(text):
+    """Indented JSON with each list of numbers on one line."""
+    return NUMBER_LIST.sub(lambda m: "[" + ", ".join(x.strip() for x in m[1].split(",")) + "]", text)
 
 
 # ------------------------------------------------------------------------------------------------------ one model
