@@ -619,6 +619,11 @@
           ],
           "description": "Whether the engine's CPU lane can compute this quant's experts: 'none' when no kernel decodes its format, 'experimental' when one exists but is not gated or validated for it"
         },
+        "offer_untested": {
+          "type": "boolean",
+          "default": false,
+          "description": "Offered while its curation is untested (not run yet, or not every check passed yet), shown as untested: for the entries from before curation existed. Only curated entries are offered otherwise; a failed one never is, unless the offer_uncurated setting is on."
+        },
         "curation": {
           "$ref": "#/$defs/curation"
         }

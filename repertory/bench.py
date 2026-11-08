@@ -25,6 +25,9 @@ prefix cache.
   quick     1 trial: the answer, documents of 1K and 8K tokens                                   ~2 min a run
   standard  3 trials: the answer, documents of 1K, 8K, 32K and 64K tokens; then the retrieval
             test: three locker combinations at 15%, 50% and 85% of a log of up to 100K tokens    ~3-6 min a run
+  reference curation's regression requests (repertory/curate.py): after the warm-up, a short answer, code, a tool
+            call, a 73K-token document with one fact to find, and a short answer with thinking on, each answer
+            recorded whole (text, reasoning, tool calls, finish reason, token counts)            ~2 min a run
 Documents that don't fit the run's context are skipped; the retrieval document is sized to it. Runs before Repertory
 used the prompts and documents of the benchmark.py in MaxDevv/lean-qwenflash, which this project began as a fork of;
 results don't compare 1:1 with those (or with his), and runs are only compared with runs of the same protocol.
@@ -79,6 +82,8 @@ WORKLOADS = {
     # while it grows or frees memory must have its first token within latency_max_s (one from a cold cache: ~2 s)
     "resize-stress": {"document": 32768, "toggles": 4, "cancel_after_s": 1.0, "stop_after_s": 1.0,
                       "latency_max_s": 4.0},
+    # curation's regression requests (REFERENCE_CASES), which curate.py compares with the model's reference
+    "reference": {"protocol": "reference-1"},
 }
 VERIFY_BAD = ("vram_bad", "ram_bad", "table_bad", "home_bad_resident", "home_bad_nonresident", "dev_bad_rows")
 # The workload's text. Changing any of it is a new protocol: runs are compared only with runs of the same one.
@@ -102,6 +107,40 @@ YIELD_AFTER_S = 10                  # how long the PC must need them before the 
 MAX_YIELDS = 3                      # a run interrupted more often is recorded as interrupted (resume redoes it)
 RAM_FLOOR_GB = 1.0                  # free RAM below this: the PC is about to run out
 PLAN = "_plan.json"                 # the benchmark's runs and workload, for resuming (not a result)
+
+# Curation's regression requests: the cases of research/engine-parity/engine_compare.py, byte for byte (so its results
+# compare with these). Greedy, streamed, each answer to its natural end (never max_tokens); thinking off except in the
+# last. Changing any of them is a new protocol: every model's reference has to be recorded again.
+REFERENCE_PROTOCOL = WORKLOADS["reference"]["protocol"]
+REFERENCE_TOOLS = [{"type": "function", "function": {
+    "name": "get_weather", "description": "Current weather for a city",
+    "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}]
+
+
+def reference_document():
+    """2,400 station log lines (about 73K tokens) with one fact to find, at line 1717."""
+    lines = []
+    for i in range(2400):
+        t = 11 + (i * 7) % 23
+        w = (i * 13) % 41
+        lines.append(f"Station log {i:04d}: temperature {t} C, wind {w} km/h, pressure {990 + (i * 3) % 40} hPa.")
+    lines[1717] = "Station log 1717: the backup generator was serviced by technician Ilsa Varga; code word PERIWINKLE."
+    return "\n".join(lines)
+
+
+REFERENCE_CASES = (
+    ("short", {"messages": [{"role": "user", "content": "Explain in three sentences how a heat pump moves heat."}]}),
+    ("code", {"messages": [{"role": "user", "content":
+              "Write a Python function that returns the n-th Fibonacci number iteratively, with a docstring."}]}),
+    ("tool", {"messages": [{"role": "user", "content": "What's the weather in Lisbon right now?"}],
+              "tools": REFERENCE_TOOLS}),
+    ("document", {"messages": [{"role": "user", "content": reference_document() +
+                  "\n\nWho serviced the backup generator, and what is the code word? Answer in one sentence."}]}),
+    ("reasoning", {"messages": [{"role": "user", "content": "Is 221 a prime number? Answer briefly."}],
+                   "chat_template_kwargs": {"enable_thinking": True}}),
+)
+# what an answer is, for the comparison: everything but its timing
+REFERENCE_ANSWER = ("content", "reasoning", "tool_calls", "finish", "prompt_tokens", "completion_tokens")
 
 
 # ---------------------------------------------------------------------------------------------------------------- runs
@@ -240,6 +279,41 @@ class Client:
                 "decode_tps": round((n - 1) / (last - first), 2) if first and last and last > first and n > 1 else None,
                 "wall_s": round(time.perf_counter() - t0, 1), "answer": "".join(text)}
 
+    def reference(self, name, body):
+        """One of curation's requests (REFERENCE_CASES): greedy, streamed to its natural end (no max_tokens), thinking
+        off unless the case turns it on. The whole answer (text, reasoning, tool calls merged from their pieces,
+        finish reason, token counts) and its timing."""
+        body = dict(body, model=self.model, temperature=0, stream=True, stream_options={"include_usage": True})
+        body.setdefault("chat_template_kwargs", {"enable_thinking": False})
+        t0 = time.perf_counter()
+        first = last = usage = finish = None
+        content, reasoning, calls = [], [], {}
+        for t, ev in self.events("/v1/chat/completions", body):
+            usage = ev.get("usage") or usage
+            for choice in ev.get("choices") or ():
+                delta = choice.get("delta") or {}
+                if delta.get("content") or delta.get("reasoning_content") or delta.get("tool_calls"):
+                    first, last = first or t, t
+                content.append(delta.get("content") or "")
+                reasoning.append(delta.get("reasoning_content") or "")
+                for tc in delta.get("tool_calls") or ():
+                    call = calls.setdefault(tc.get("index", len(calls)), {"name": "", "arguments": ""})
+                    fn = tc.get("function") or {}
+                    call["name"] += fn.get("name") or ""
+                    call["arguments"] += fn.get("arguments") or ""
+                finish = choice.get("finish_reason") or finish
+        u = usage or {}
+        n, p = int(u.get("completion_tokens") or 0), int(u.get("prompt_tokens") or 0)
+        ttft = first - t0 if first else None
+        decode_s = last - first if first and last and last > first else None
+        return {"name": name, "content": "".join(content), "reasoning": "".join(reasoning),
+                "tool_calls": [calls[i] for i in sorted(calls)], "finish": finish, "prompt_tokens": p,
+                "completion_tokens": n, "cached_tokens": (u.get("prompt_tokens_details") or {}).get("cached_tokens"),
+                "ttft_s": round(ttft, 3) if ttft is not None else None,
+                "prefill_tps": round(p / max(ttft, 1e-6), 1) if ttft is not None and p else None,
+                "decode_tps": round((n - 1) / decode_s, 2) if decode_s and n > 1 else None,
+                "decode_s": round(decode_s, 4) if decode_s else None, "total_s": round(time.perf_counter() - t0, 3)}
+
     def engine_stats(self):
         """Where the expert picks came from, and the cache's size."""
         st = self.get("/stats")
@@ -274,6 +348,16 @@ def machine_facts(hw, kind, display):
             "stack": {"torch": e.get("torch"), "cuda": e.get("cuda_version"),
                       "driver": (hw.get("driver") or {}).get("version"),
                       "commit": (repo.get("head") or "")[:7] or None}}
+
+
+def reference_speed(cases):
+    """A reference run's speeds. Decode over every answer of 16+ tokens together (the tokens after the first, over the
+    time from the first to the last), which steadies the short ones; prefill from the long document (its prompt
+    tokens over the time to its first token)."""
+    timed = [c for c in cases if c.get("decode_s") and c["completion_tokens"] >= 16]
+    tokens, seconds = sum(c["completion_tokens"] - 1 for c in timed), sum(c["decode_s"] for c in timed)
+    doc = next((c for c in cases if c["name"] == "document"), {})
+    return {"decode_tps": round(tokens / seconds, 2) if seconds else None, "prefill_tps": doc.get("prefill_tps")}
 
 
 # ------------------------------------------------------------------------------------------------------------- results
@@ -822,6 +906,8 @@ class Bench:
             return await self.resize_steps(client, r, rec, save)
         if self.workload == "resize-stress":
             return await self.stress_steps(client, r, rec, save)
+        if self.workload == "reference":
+            return await self.reference_steps(client, rec, save)
         wl = WORKLOADS[self.workload]
 
         def check():
@@ -869,6 +955,41 @@ class Bench:
             self.emit(f"  long document: {a['prompt_tokens']:,} tokens read at {fmt(a['prefill_tps'], '{:,.0f}')} "
                       f"tok/s, {'all three combinations found' if a['codes_found'] else 'combinations MISSED'}")
             save()
+
+    async def reference_steps(self, client, rec, save):
+        """Curation's regression requests (REFERENCE_CASES) after the warm-up, each answer recorded whole; curate.py
+        compares them with the model's reference. The figures the tables show come along: decode over the answers,
+        prefill and the fact found in the long document."""
+        def check():
+            if self.cancelled or self.yielded:
+                raise RuntimeError(self.why_stopped("stopped"))
+        for text in WARMUP:                                           # not scored
+            check()
+            await asyncio.to_thread(client.answer, text)
+        hw = self.svc.setup.hw or {}
+        cases = []
+        rec["engine_commit"] = (hw.get("engine") or {}).get("engine_head") or (hw.get("repo") or {}).get("head")
+        rec["reference"] = {"protocol": REFERENCE_PROTOCOL, "cases": cases}
+        for name, body in REFERENCE_CASES:
+            check()
+            a = await asyncio.to_thread(client.reference, name, body)
+            cases.append(a)
+            save()
+            calls = ", ".join(f"{c['name']}({c['arguments']})" for c in a["tool_calls"])
+            self.emit(f"  {name}: {a['completion_tokens']:,} tokens ({a['finish']}"
+                      + (f", calls {calls}" if calls else "") + f"), first token after {fmt(a['ttft_s'], '{:.2f}')} s"
+                      + (f", {fmt(a['decode_tps'])} tok/s" if a["decode_tps"] else ""))
+        speed = reference_speed(cases)
+        rec["reference"].update(speed)
+        rates = [c["decode_tps"] for c in cases if c.get("decode_tps") and c["completion_tokens"] >= 16]
+        rec["decode_tps_median"], rec["decode_tps_min"] = speed["decode_tps"], (min(rates) if rates else None)
+        rec["short_ttft_median_s"] = cases[0]["ttft_s"]
+        doc = next(c for c in cases if c["name"] == "document")
+        rec["long"] = {"prompt_tokens": doc["prompt_tokens"], "prefill_tps": doc["prefill_tps"],
+                       "needle_found": "PERIWINKLE" in doc["content"]}
+        self.emit(f"  reference: decode {fmt(speed['decode_tps'])} tok/s over the answers, the "
+                  f"{doc['prompt_tokens']:,}-token document read at {fmt(speed['prefill_tps'], '{:,.0f}')} tok/s")
+        save()
 
     def resize_kit(self, client, r, wl):
         """What the resize workloads share: answers, the per-size check, the manager's own switch requests, and the

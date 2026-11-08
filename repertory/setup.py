@@ -96,8 +96,8 @@ class Setup:
     @property
     def steps(self):
         """This platform's steps, as setup shows them: a model's only when it is on offer (catalog.offered: curated,
-        or from before curation), or the offer_uncurated setting is on, or it is installed, running or the chosen
-        model already."""
+        or untested with offer_untested), or the offer_uncurated setting is on, or it is installed, running or the
+        chosen model already."""
         cfg = getattr(self.svc, "cfg", None) or {}
         out = []
         for s in all_steps():

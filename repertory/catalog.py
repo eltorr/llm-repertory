@@ -264,13 +264,11 @@ def status(model):
 
 
 def offered(model, show_all=False):
-    """Whether setup and the dashboard offer the model: curated ones; and, so nothing changes for entries from before
-    curation existed, those with no curation result at all (shown as untested). A curation run that didn't pass every
-    check (failed, or untested: a check not run or not yet compared) hides it, unless show_all (the offer_uncurated
-    setting)."""
-    if show_all or "curation" not in model:
-        return True
-    return status(model) == "curated"
+    """Whether setup and the dashboard offer the model: when it is curated; when it is untested and its entry says
+    offer_untested (the entries from before curation existed, shown as untested, so nothing changes for them until
+    they are curated); never when it failed. show_all (the offer_uncurated setting) offers every one."""
+    st = status(model)
+    return show_all or st == "curated" or (st == "untested" and bool(model.get("offer_untested")))
 
 
 def served_name(model):

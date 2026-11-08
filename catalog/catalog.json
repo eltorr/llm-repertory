@@ -253,7 +253,8 @@
           "report": "research/vram-scaling-torch-2.15/REPORT.md"
         }
       ],
-      "cpu_execution": "experimental"
+      "cpu_execution": "experimental",
+      "offer_untested": true
     },
     {
       "id": "qwen3.8-flash-next-exl3-4.05",
@@ -335,7 +336,8 @@
           "report": "research/vram-scaling-torch-2.15/REPORT.md"
         }
       ],
-      "cpu_execution": "none"
+      "cpu_execution": "none",
+      "offer_untested": true
     }
   ]
 }

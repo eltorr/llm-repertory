@@ -139,11 +139,19 @@ class OfferTests(unittest.TestCase):
         m = copy.deepcopy(DATA["models"][0])
         m.pop("curation", None)
         self.assertEqual(catalog.status(m), "untested")
-        self.assertTrue(catalog.offered(m))                 # from before curation: offered, as untested
-        for st, shown in (("curated", True), ("failed", False), ("untested", False)):
+        self.assertTrue(m["offer_untested"])                 # Qwen's two predate curation: offered, as untested
+        self.assertTrue(catalog.offered(m))
+        for st, shown in (("curated", True), ("failed", False), ("untested", True)):
             m["curation"] = {"status": st, "date": "2026-11-07", "checks": {}}
             self.assertEqual(catalog.offered(m), shown, st)
             self.assertTrue(catalog.offered(m, show_all=True), st)
+        m.pop("offer_untested")                              # a new entry: only once it is curated
+        for st, shown in (("curated", True), ("failed", False), ("untested", False)):
+            m["curation"] = {"status": st, "date": "2026-11-07", "checks": {}}
+            self.assertEqual(catalog.offered(m), shown, st)
+        m.pop("curation")
+        self.assertFalse(catalog.offered(m))
+        self.assertTrue(catalog.offered(m, show_all=True))
 
 
 class SaveTests(unittest.TestCase):
