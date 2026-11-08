@@ -23,6 +23,9 @@ What changed in Repertory, newest first.
 - **What is offered:** curated entries, and untested ones marked `offer_untested`. The two Qwen quants are marked:
   they stay offered, shown as untested, until their GPU run passes. A failed entry is offered only with the new
   setting *Also offer models that haven't passed curation*.
+- **Checking a download** drops what it read from the page cache, as downloading already did: hashing a 100 GB
+  model no longer fills RAM next to a running model. The files check ignores the resume files QwenFlash's
+  downloader left beside each file (`FILE.http-state.json`).
 
 ## 2026-11-07: measured
 

@@ -150,6 +150,12 @@ class CompatTests(unittest.TestCase):
         for what in ("still downloading", "never checked", "notes.txt", "another revision", "isn't packed"):
             self.assertIn(what, d["detail"])
 
+    def test_the_earlier_downloaders_state_files_are_not_model_files(self):
+        folder = download(self.root, catalog.load().model(M405), self.hub)
+        (folder / "config.json.http-state.json").write_text("[0]")      # QwenFlash's downloader left these
+        d = by_name(self.check())["files"]
+        self.assertTrue(d["ok"], d)
+
     def test_a_download_without_a_record_is_not_taken_as_checked(self):
         download(self.root, catalog.load().model(M305), self.hub, verified=False)
         d = by_name(self.check(M305))["files"]

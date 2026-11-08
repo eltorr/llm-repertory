@@ -349,7 +349,9 @@ def files_item(model, files, info):
     except ValueError:
         verified = {}
     partial = [f for f in listing if f.endswith((".part", ".part.json"))]
-    present = [f for f in listing if f not in partial and f != ".verified.json" and not f.startswith(".cache/")]
+    # FILE.http-state.json: the resume state QwenFlash's downloader kept beside each file, not part of the model
+    present = [f for f in listing if f not in partial and f != ".verified.json" and not f.startswith(".cache/")
+               and not f.endswith(".http-state.json")]
     why = []
     if partial:
         why.append(f"{len(partial)} file(s) still downloading")

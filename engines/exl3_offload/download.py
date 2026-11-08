@@ -81,9 +81,14 @@ def file_digest(path, blob):
     # git names a file by this sha1: a fixed format to compare against, not a choice of hash for security
     h = (hashlib.sha1(b"blob %d\0" % Path(path).stat().st_size, usedforsecurity=False) if blob
          else hashlib.sha256())
+    drop = getattr(os, "posix_fadvise", None)
     with open(path, "rb") as f:
+        done = 0
         while block := f.read(16 * 1024 ** 2):
             h.update(block)
+            if drop:   # hashing 100 GB must not fill the page cache: it would crowd out the running model's RAM
+                drop(f.fileno(), done, len(block), os.POSIX_FADV_DONTNEED)
+            done += len(block)
     return h.hexdigest()
 
 

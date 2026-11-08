@@ -31,6 +31,16 @@ class FileTests(unittest.TestCase):
             self.assertEqual(D.file_digest(p, blob=True), "ce013625030ba8dba906f756967f9e9ca394464a")   # git's id
             self.assertEqual(D.file_digest(p, blob=False), hashlib.sha256(b"hello\n").hexdigest())
 
+    def test_hashing_drops_what_it_read_from_the_page_cache(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "f"
+            p.write_bytes(b"x" * 1000)
+            with mock.patch.object(D.os, "posix_fadvise", lambda fd, off, n, adv: calls.append((off, n)),
+                                   create=True), mock.patch.object(D.os, "POSIX_FADV_DONTNEED", 4, create=True):
+                D.file_digest(p, blob=False)
+        self.assertEqual(calls, [(0, 1000)])            # every block read, given back (Linux: posix_fadvise)
+
     def test_pieces_cover_the_file_exactly(self):
         with mock.patch.object(D, "PIECE", 10):
             r = D.Remote("x", 25, "d", False)
