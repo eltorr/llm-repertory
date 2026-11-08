@@ -897,8 +897,7 @@ class Service:
 
     # ================================================================ the network port
     def models_list(self):
-        # the catalog's name for the model; the engine's own server keeps its default, the same for Qwen (it serves
-        # only Qwen: engines/exl3_offload/qwen_chat.py)
+        # the catalog's name for the model, as the model server's own /v1/models lists it (server.served_name)
         return {"object": "list", "data": [{"id": catalog.served_name(self.model()), "object": "model", "created": 0,
                                             "owned_by": "repertory", "max_model_len": self.cfg["context"]}]}
 

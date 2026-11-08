@@ -1,11 +1,13 @@
-"""Qwen3.8's chat format, for the engine's hooks (server.py sets them): the prompt, its tool calls and its sampling.
+"""Qwen3.8's chat format, for the engine's hooks (server.py sets them for a qwen4_exp model): the prompt, its tool
+calls, its sampling and its reasoning levels. glm_chat.py is GLM-5.3's; both have the same names.
 
   ChatTemplate      renders the model folder's chat template in Jinja's sandbox, as Hugging Face's tokenizers
                     do, so no Python from the model folder ever runs
   parse_tool_calls  the model's tool calls as OpenAI tool_calls
   with_sampling     the sampling values the model is meant to run with, where a request leaves them out
+  EFFORTS           OpenAI's reasoning effort as the template's levels
 
-The engine splits the answer into reasoning, content and tool calls (glm53/stream_split.py); its tags are Qwen3.8's.
+The engine splits the answer into reasoning, content and tool calls (glm53/stream_split.py) at the tags below.
 The format, as the model writes it (the prompt has already opened the think block when thinking is on):
   ...reasoning...</think>
 
@@ -24,11 +26,17 @@ import secrets
 import time
 from pathlib import Path
 
+NAME = "qwen"
 CALL_OPEN, CALL_CLOSE = "<tool_call>", "</tool_call>"
+THINK_OPEN, THINK_CLOSE, TOOL_OPEN = "<think>", "</think>", CALL_OPEN
+END_OF_TURN = ("<|im_end|>",)       # with the ids config.json and generation_config.json list
 
 # The values the Qwen team recommends: one set with thinking on, one with it off
 SAMPLING = {True: {"temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0},
             False: {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0}}
+# OpenAI's scale as the template's levels: it takes low, medium and xhigh and refuses anything else
+# (glm53/openai_compat.py maps the request; none / off / disabled turn thinking off). The engine's own default.
+EFFORTS = {"minimal": "low", "low": "low", "medium": "medium", "high": "xhigh", "xhigh": "xhigh", "max": "xhigh"}
 
 
 def thinking_on(body):

@@ -31,8 +31,9 @@ the prefix cache served (cached_tokens).
 
 As a module (a wrapper server for another model): load the model elsewhere (engines/exl3_offload/loader.py), set the
 globals load() sets (args, model, config, cache, tok, draft_model, draft_cache, EOS, hf_tok, CTX, t_load) and replace
-what is model-specific: chat_prompt, parse_tool_calls, openai_sp, startup, run_job, AsyncJob, and the tags THINK_OPEN,
-THINK_CLOSE, TOOL_OPEN. Everything here looks them up when a request comes in, so assignments take effect.
+what is model-specific: chat_prompt, parse_tool_calls, openai_sp, startup, run_job, AsyncJob, the tags THINK_OPEN,
+THINK_CLOSE, TOOL_OPEN, and EFFORTS (OpenAI's reasoning effort as the template's levels). Everything here looks them up
+when a request comes in, so assignments take effect.
 """
 import argparse, asyncio, contextvars, json, os, re, sys, time, uuid
 import torch
@@ -45,13 +46,14 @@ from fastapi.responses import StreamingResponse, JSONResponse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import offload_stack, stream_split
-from openai_compat import normalize_chat_request
+from openai_compat import EFFORT_MAP, normalize_chat_request
 from openai_responses import RequestError, ResponseBuilder, responses_to_chat
 
 app = FastAPI()
 G = {"gen": None, "stats": {"requests": 0, "completion_tokens": 0}}
 THINK_OPEN, THINK_CLOSE = "<think>", "</think>"   # reasoning block (GLM-5.3, Qwen3.8)
 TOOL_OPEN = "<tool_call>"                          # start of a tool call: never streamed as content
+EFFORTS = EFFORT_MAP                               # reasoning effort -> the template's level (openai_compat.py)
 
 
 def load():
@@ -438,7 +440,7 @@ def prepare_turn(body):
     """A chat-shaped request (a Responses one after responses_to_chat, or Chat Completions as sent) as the model runs
     it: the prompt's ids, tools, sampling, stops. ValueError for one it can't: chat_prompt may raise one (a template
     that refuses the conversation), and ContextFull when the prompt leaves no room for an answer."""
-    body = normalize_chat_request(body)
+    body = normalize_chat_request(body, EFFORTS)
     kw = dict(body.get("chat_template_kwargs") or {})
     if body.get("reasoning_effort") is not None:
         kw.setdefault("reasoning_effort", body["reasoning_effort"])

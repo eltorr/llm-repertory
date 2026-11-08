@@ -8,8 +8,10 @@ engines/exl3_offload/run.sh starts it sized for the card; the manager starts it 
 The model is loaded by loader.py and served by the engine's own app (glm53-flash-offload/glm53/serve.py): its routes
 answer every request, /v1/responses and /v1/chat/completions included, with the context check, the prefix-cache
 figures and OpenAI's 400s. This file adds what is Repertory's or the model's:
-  - the model's format in the engine's hooks (qwen_chat.py): its chat template, its tool calls, its sampling values
-    where a request leaves them out, and its end-of-turn token among the stop tokens;
+  - the model's format in the engine's hooks, chosen by its config.json's model_type (qwen_chat.py for Qwen3.8,
+    glm_chat.py for GLM-5.3): its chat template, its tool calls, its sampling values where a request leaves them out,
+    its reasoning levels, its tags and its end-of-turn tokens among the stop tokens;
+  - the name /v1/models lists: the catalog's for the model folder (catalog.served_name), unless --served-name;
   - /memory: the RAM and VRAM watchdogs (memory_guard.py);
   - the manager's switches without a restart: POST /expert_cache/resize, GET /expert_cache/ram and
     POST /expert_cache/ram/stop;
@@ -33,8 +35,13 @@ KEY_HEADER = b"x-repertory-key"
 
 sys.path.insert(0, str(HERE))
 sys.path.append(str(ENGINE))            # the engine's modules: serve, nv2, expert_cache...
+import glm_chat  # noqa: E402
 import memory_guard  # noqa: E402
 import qwen_chat  # noqa: E402
+
+# The chat formats, by the model_type in a model's config.json. Each module has the same names: ChatTemplate,
+# parse_tool_calls, with_sampling, EFFORTS, END_OF_TURN and the tags THINK_OPEN, THINK_CLOSE, TOOL_OPEN.
+CHAT_FORMATS = {"qwen4_exp": qwen_chat, "glm5_next": glm_chat}
 
 
 # ------------------------------------------------------------------------------------------------------- live resize
@@ -228,9 +235,39 @@ class RamWorker:
 
 
 # ---------------------------------------------------------------------------------------------------------- the model
-def stop_tokens(config, tok, model_dir):
+def chat_format(model_dir):
+    """The chat format module for the model in model_dir, by its config.json's model_type; ValueError for a model
+    this server has no format for."""
+    try:
+        cfg = json.loads((Path(model_dir) / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise ValueError(f"no readable config.json in {model_dir}: {e}") from e
+    kind = cfg.get("model_type") if isinstance(cfg, dict) else None
+    if kind not in CHAT_FORMATS:
+        raise ValueError(f"{model_dir}: no chat format for model_type {kind!r} (this server has "
+                         f"{', '.join(CHAT_FORMATS)})")
+    return CHAT_FORMATS[kind]
+
+
+def served_name(model_dir):
+    """The name /v1/models lists for the model in model_dir: its catalog entry's (catalog.served_name), the entry
+    whose folder it is; else the folder's own name."""
+    here = Path(model_dir).resolve()
+    if str(ROOT) not in sys.path:
+        sys.path.append(str(ROOT))          # the manager's catalog module: standard library only
+    try:
+        from repertory import catalog
+        for m in catalog.load().models:
+            if (ROOT / m["paths"]["model_dir"]).resolve() == here:
+                return catalog.served_name(m)
+    except (ImportError, OSError, ValueError):
+        pass
+    return here.name
+
+
+def stop_tokens(config, tok, model_dir, names=qwen_chat.END_OF_TURN):
     """Token ids that end an answer: the model config's, the tokenizer's, generation_config.json's and the chat
-    format's end of turn."""
+    format's end of turn (`names`, as tokens)."""
     ids = set(getattr(config, "eos_token_id_list", None) or [])
     if tok.eos_token_id is not None:
         ids.add(tok.eos_token_id)
@@ -239,20 +276,22 @@ def stop_tokens(config, tok, model_dir):
     except (OSError, ValueError):
         listed = None
     ids.update(listed if isinstance(listed, list) else [] if listed is None else [listed])
-    try:
-        ids.add(tok.single_id("<|im_end|>"))
-    except (KeyError, ValueError, AttributeError):
-        pass
+    for name in names:
+        try:
+            ids.add(tok.single_id(name))
+        except (KeyError, ValueError, AttributeError):
+            pass
     return sorted(int(i) for i in ids)
 
 
 # ------------------------------------------------------------------------------------------------------------ server
 class Server:
-    """The engine's app with Repertory's additions, around a loaded model."""
+    """The engine's app with Repertory's additions, around a loaded model. chat: its chat format's module
+    (CHAT_FORMATS); template: its chat template, compiled (chat.ChatTemplate)."""
 
-    def __init__(self, cli, engine, loaded, template, ram, vram):
+    def __init__(self, cli, engine, loaded, chat, template, ram, vram):
         model, config, cache, tok, self.pools, self.tables, draft_model, draft_cache = loaded
-        self.cli, self.engine, self.template, self.ram, self.vram = cli, engine, template, ram, vram
+        self.cli, self.engine, self.chat, self.template, self.ram, self.vram = cli, engine, chat, template, ram, vram
         self.resizing, self.worker = asyncio.Lock(), None
         # what the engine's routes read from the command line serve.load would have parsed
         settings = {"cache_size": cli.cache, "chunk_size": cli.chunk, "cache_quant": "4",
@@ -264,20 +303,32 @@ class Server:
         engine.args = argparse.Namespace(**settings, host=cli.host, port=cli.port)
         engine.model, engine.config, engine.cache, engine.tok = model, config, cache, tok
         engine.draft_model, engine.draft_cache = draft_model, draft_cache
-        engine.EOS, engine.CTX, engine.hf_tok = stop_tokens(config, tok, cli.model), cli.cache, None
+        engine.EOS = stop_tokens(config, tok, cli.model, chat.END_OF_TURN)
+        engine.CTX, engine.hf_tok = cli.cache, None
         self.wire()
 
     # -------------------------------------------------------------------------------------- engine hooks
-    def wire(self):
+    def set_hooks(self):
         """The model's format in the engine's hooks, wherever it builds a prompt or reads an answer: the chat template
-        (its refusals are TemplateError, a ValueError: the engine answers 400), the tool calls and the sampling
-        values. Qwen3.8 writes the engine's own think and tool-call tags, so those stay. Then Repertory's routes."""
-        e, server = self.engine, self
-        plain_sampling = e.openai_sp
-        e.openai_sp = lambda body: plain_sampling(qwen_chat.with_sampling(body))
-        e.chat_prompt = lambda messages, enable_thinking=True, tools=None, template_kwargs=None: self.template.render(
+        (its refusals are TemplateError, a ValueError: the engine answers 400), the tool calls, the sampling values,
+        the reasoning levels and the think and tool-call tags (Qwen3.8 and GLM-5.3 both write the engine's own)."""
+        e, fmt, template = self.engine, self.chat, self.template
+        plain = getattr(e.openai_sp, "plain", e.openai_sp)       # the engine's own, not another format's wrapping
+
+        def sampling(body):
+            return plain(fmt.with_sampling(body))
+        sampling.plain = plain
+        e.openai_sp = sampling
+        e.chat_prompt = lambda messages, enable_thinking=True, tools=None, template_kwargs=None: template.render(
             e.normalize_messages(messages), tools, enable_thinking, template_kwargs)
-        e.parse_tool_calls = qwen_chat.parse_tool_calls
+        e.parse_tool_calls = fmt.parse_tool_calls
+        e.EFFORTS = fmt.EFFORTS
+        e.THINK_OPEN, e.THINK_CLOSE, e.TOOL_OPEN = fmt.THINK_OPEN, fmt.THINK_CLOSE, fmt.TOOL_OPEN
+
+    def wire(self):
+        """The model's format in the engine's hooks (set_hooks), then Repertory's routes."""
+        e, server = self.engine, self
+        self.set_hooks()
         from fastapi import Request
 
         async def resize(req: Request):
@@ -445,7 +496,7 @@ def parse_args(argv=None):
                    help="prefill chunk in tokens (default QWEN_CHUNK, else 24576)")
     p.add_argument("--host", default="127.0.0.1", help="address to listen on (default 127.0.0.1: this machine only)")
     p.add_argument("--port", type=int, default=30000)
-    p.add_argument("--served-name", default="qwen3.8-flash-next", help="the model name /v1/models lists")
+    p.add_argument("--served-name", help="the model name /v1/models lists (default: the catalog's for --model)")
     # Off by default; the environment variables let run.sh and the manager set them.
     p.add_argument("--mtp", type=int, default=int(os.environ.get("QWEN_MTP", "0")),
                    help="Tokens the MTP layer drafts per step (0: off)")
@@ -479,6 +530,9 @@ def measure_vram():
 
 def main(argv=None):
     cli = parse_args(argv)
+    chat = chat_format(cli.model)               # before the long load: a model without a format stops here
+    template = chat.ChatTemplate.from_model(cli.model)
+    cli.served_name = cli.served_name or served_name(cli.model)
     if cli.prefetch:
         os.environ["GLM53_NV_PREFETCH"] = "1"
     try:
@@ -498,9 +552,9 @@ def main(argv=None):
     sys.path.insert(0, str(ENGINE))
     import serve as engine
     engine.t_load = time.monotonic() - t0
-    Server(cli, engine, loaded, qwen_chat.ChatTemplate.from_model(cli.model), ram, vram)
-    print(f"ENGINE READY in {engine.t_load:.0f} s: context {cli.cache:,} tokens, {cli.ram_gb:g} GiB RAM cache",
-          flush=True)
+    Server(cli, engine, loaded, chat, template, ram, vram)
+    print(f"ENGINE READY in {engine.t_load:.0f} s: {cli.served_name} ({chat.NAME} chat format), context "
+          f"{cli.cache:,} tokens, {cli.ram_gb:g} GiB RAM cache", flush=True)
     import uvicorn
     # no access log: request paths are client text, and the manager reads this log for out-of-memory messages
     uvicorn.run(LocalOnly(engine.app, os.environ.get("REPERTORY_BACKEND_KEY", ""), cli.host in LOCAL_NAMES),

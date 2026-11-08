@@ -5,7 +5,7 @@
 #   engines/exl3_offload/run.sh server    OpenAI-compatible API on $HOST:$PORT (default 127.0.0.1:30000),
 #                                         context window $CONTEXT tokens (default 262144)
 #
-# Overrides (environment): QUANT (3.05 | 4.05, or another catalog model's with MODEL_DIR, STORE and RAM_GB), RAM_GB,
+# Overrides (environment): QUANT (a catalog model's quant: 3.05, 4.05, glm-3.05), RAM_GB,
 #   MODEL_DIR, STORE (the manager passes both from the catalog), HOST, PORT,
 #   QWEN_VRAM_LIMIT_BYTES  device-wide VRAM the expert cache may grow into (includes other apps' VRAM)
 #   QWEN_TORCH_LIMIT_BYTES this process's torch allocator cap
@@ -30,11 +30,14 @@ case "$QUANT" in
   # every expert: 48 layers x 512 experts x (1.843 MB | 2.457 MB)
   3.05) : "${MODEL_DIR:=./model}"      "${STORE:=./store/qwen.bin}";    EXPERT_BYTES=45290000000 ;;
   4.05) : "${MODEL_DIR:=./model-4.05}" "${STORE:=./store/qwen405.bin}"; EXPERT_BYTES=60380000000 ;;
-  *) [ -n "${MODEL_DIR:-}" ] && [ -n "${STORE:-}" ] && [ -n "${RAM_GB:-}" ] \
-       || { echo "unknown QUANT=$QUANT (use 3.05 or 4.05, or set MODEL_DIR, STORE and RAM_GB)"; exit 2; } ;;
+  # another catalog model (glm-3.05): its folder, store and expert bytes from the catalog; MODEL_DIR and STORE win
+  *) MODEL_VARS=$(python3 engines/exl3_offload/sizing.py model --quant "$QUANT" 2>/dev/null) \
+       || { echo "unknown QUANT=$QUANT (use a catalog model's quant: 3.05, 4.05, glm-3.05)"; exit 2; }
+     eval "$MODEL_VARS" ;;
 esac
-[ -d "$MODEL_DIR" ] || { echo "model not found at $MODEL_DIR (download it: setup/50_model.sh . $QUANT)"; exit 2; }
-[ -f "$STORE" ]     || { echo "expert store not found at $STORE (setup/50_model.sh . $QUANT packs it)"; exit 2; }
+# the model's setup step downloads it and packs its store (repertory setup m305, m405, mglm305, or the Setup tab)
+[ -d "$MODEL_DIR" ] || { echo "model not found at $MODEL_DIR (download it: its setup step)"; exit 2; }
+[ -f "$STORE" ]     || { echo "expert store not found at $STORE (its setup step packs it)"; exit 2; }
 
 # --- GPU: sizes from the card that is actually here ---------------------------------------------------------------
 # The offload engine is single-GPU (docs/research/multi-gpu.md): with several cards visible, pin it to one.
@@ -110,5 +113,5 @@ fi
 case "$MODE" in
   server) exec python engines/exl3_offload/server.py --model "$MODEL_DIR" --store "$STORE" --ram-gb "$RAM_GB" \
                  --cache "$CONTEXT" --chunk "$QWEN_CHUNK" --host "${HOST:-127.0.0.1}" --port "${PORT:-30000}" "$@" ;;
-  *) echo "usage: [QUANT=3.05|4.05] $0 server [args]"; exit 2 ;;
+  *) echo "usage: [QUANT=3.05|4.05|glm-3.05] $0 server [args]"; exit 2 ;;
 esac

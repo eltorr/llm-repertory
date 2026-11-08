@@ -17,6 +17,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "engines" / "exl3_offload"))
+import glm_chat  # noqa: E402
 import qwen_chat  # noqa: E402
 import server  # noqa: E402
 
@@ -158,7 +159,7 @@ def setUpModule():
     cli = argparse.Namespace(model=str(ROOT / "no-model"), cache=1000, chunk=2048, host="127.0.0.1", port=30001,
                              served_name="qwen3.8-flash-next", mtp=0)
     loaded = (None, types.SimpleNamespace(eos_token_id_list=[]), None, LIVE.tok, None, None, None, None)
-    server.Server(cli, serve, loaded, Template(), ram=None, vram=None)
+    server.Server(cli, serve, loaded, qwen_chat, Template(), ram=None, vram=None)
     LIVE.patches.append(mock.patch.object(serve, "AsyncJob", Job))
     LIVE.patches[1].start()
 
@@ -380,6 +381,89 @@ class RefusalTests(EngineRoutes):
             self.assertEqual((status, r["error"]["message"], r["error"]["code"]),
                              (400, "Unexpected message role.", None))
         self.assertEqual(Job.made, [])
+
+
+# GLM-5.3's generation prompt, as its template writes it: the think block always open, no enable_thinking (glm_chat
+# closes it empty with thinking off); what the template was given in the system turn
+GLM_SOURCE = ("[gMASK]<sop><|system|>tools={{ tools is not none }} effort={{ reasoning_effort | default('') }}"
+              "<|user|>{{ messages[-1].content }}<|assistant|><think>")
+GLM_CALL = ("<tool_call>multiply<arg_key>a</arg_key><arg_value>17</arg_value><arg_key>b</arg_key><arg_value>23"
+            "</arg_value></tool_call>")
+
+
+@unittest.skipUnless(importlib.util.find_spec("jinja2"), "needs jinja2 (the engine's environment)")
+class GlmTests(EngineRoutes):
+    """The same engine wired for GLM-5.3 (server.chat_format picks glm_chat for a glm5_next model): its template's
+    thinking switch, its tool calls, its sampling values, its reasoning levels and its stop tokens. The Qwen wiring
+    comes back afterwards."""
+
+    def setUp(self):
+        super().setUp()
+        e = self.e
+        keep = ("openai_sp", "chat_prompt", "parse_tool_calls", "EFFORTS", "THINK_OPEN", "THINK_CLOSE", "TOOL_OPEN",
+                "EOS")
+        patch = mock.patch.multiple(e, **{k: getattr(e, k) for k in keep})
+        patch.start()
+        self.addCleanup(patch.stop)
+        glm = server.Server.__new__(server.Server)                  # the hooks only: the routes are wired once
+        glm.engine, glm.chat, glm.template = e, glm_chat, glm_chat.ChatTemplate(GLM_SOURCE)
+        glm.set_hooks()
+        ids = {"<|endoftext|>": 1, "<|user|>": 2, "<|observation|>": 3}
+        tok = types.SimpleNamespace(eos_token_id=1, single_id=lambda name: ids[name])
+        e.EOS = server.stop_tokens(types.SimpleNamespace(eos_token_id_list=[]), tok, ROOT / "no-model",
+                                   glm_chat.END_OF_TURN)
+
+    def test_thinking_tool_calls_sampling_and_stop_tokens(self):
+        Job.ANSWER = "Need the product.</think>Let me multiply." + GLM_CALL
+        status, body = self.chat({"messages": [{"role": "user", "content": "17 x 23?"}], "tools": TOOLS})
+        msg = body["choices"][0]["message"]
+        self.assertEqual(status, 200)
+        self.assertEqual((msg["reasoning_content"], msg["content"]), ("Need the product.", "Let me multiply."))
+        self.assertEqual(json.loads(msg["tool_calls"][0]["function"]["arguments"]), {"a": 17, "b": 23})
+        self.assertEqual(body["choices"][0]["finish_reason"], "tool_calls")
+        self.assertTrue(self.tok.prompts[-1].startswith("[gMASK]<sop><|system|>tools=True"))
+        self.assertTrue(self.tok.prompts[-1].endswith("<|assistant|><think>"))            # thinking on
+        job = Job.made[-1]
+        self.assertEqual(job.sampler, {"temperature": 1.0, "top_p": 0.95, "top_k": 0, "min_p": 0.0})
+        self.assertEqual(job.stop_conditions, [1, 2, 3])
+
+    def test_thinking_off_and_reasoning_levels(self):
+        Job.ANSWER = "40"
+        _, body = self.chat({"messages": [{"role": "user", "content": "17 + 23?"}], "chat_template_kwargs": OFF})
+        self.assertTrue(self.tok.prompts[-1].endswith("<|assistant|><think></think>"))
+        msg = body["choices"][0]["message"]
+        self.assertEqual((msg["content"], msg["reasoning_content"]), ("40", None))
+        self.chat({"messages": [{"role": "user", "content": "q"}], "reasoning_effort": "high"})
+        self.assertIn("effort=high<", self.tok.prompts[-1])                              # GLM's level, not xhigh
+        self.responses({"input": "q", "reasoning": {"effort": "minimal"}})
+        self.assertIn("effort=low<", self.tok.prompts[-1])
+        self.responses({"input": "q", "reasoning": {"effort": "none"}})
+        self.assertTrue(self.tok.prompts[-1].endswith("<think></think>"))                 # thinking off
+
+    def test_a_streamed_response_with_glms_call(self):
+        Job.ANSWER = "Need it.</think>On it." + GLM_CALL
+        _, stream = self.responses({"input": "17 x 23?", "tools": RESPONSES_TOOLS, "stream": True})
+        ev = events(stream)
+        self.assertEqual("".join(e["delta"] for e in ev if e["type"] == "response.output_text.delta"), "On it.")
+        done = ev[-1]["response"]
+        self.assertEqual([o["type"] for o in done["output"]], ["reasoning", "message", "function_call"])
+        self.assertEqual(json.loads(done["output"][2]["arguments"]), {"a": 17, "b": 23})
+
+    def test_rewiring_does_not_stack_the_formats_sampling(self):
+        # the Qwen wiring wrapped the engine's own openai_sp; GLM's replaces that wrapping, it doesn't wrap it again
+        sp = self.e.openai_sp({})
+        self.assertEqual((sp["temperature"], sp["top_p"], sp["top_k"], sp["min_p"]), (1.0, 0.95, None, None))
+
+
+class FormatChoiceTests(unittest.TestCase):
+    def test_the_model_type_picks_the_format(self):
+        with tempfile.TemporaryDirectory() as d:
+            for kind, fmt in (("glm5_next", glm_chat), ("qwen4_exp", qwen_chat)):
+                (Path(d) / "config.json").write_text(json.dumps({"model_type": kind}))
+                self.assertIs(server.chat_format(d), fmt)
+            (Path(d) / "config.json").write_text(json.dumps({"model_type": "llama"}))
+            with self.assertRaises(ValueError):
+                server.chat_format(d)
 
 
 class StopTokenTests(unittest.TestCase):
