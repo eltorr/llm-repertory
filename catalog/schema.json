@@ -492,14 +492,17 @@
           }
         },
         "facts": {
-          "description": "What sizing needs: the expert layout and the VRAM that isn't experts.",
+          "description": "What sizing needs: the expert layout and size, the VRAM that isn't experts, the KV cache and prefill activations per token, the largest context.",
           "type": "object",
           "required": [
             "experts_per_layer",
             "moe_layers",
             "experts_per_token",
             "expert_bytes",
-            "fixed_vram_bytes"
+            "fixed_vram_bytes",
+            "kv_bytes_per_token",
+            "prefill_act_bytes_per_token",
+            "max_context"
           ],
           "additionalProperties": false,
           "properties": {
@@ -530,6 +533,10 @@
                 "type": "integer"
               },
               "description": "By KV bits"
+            },
+            "prefill_act_bytes_per_token": {
+              "type": "integer",
+              "description": "VRAM for a prefill chunk's activations, per prompt token"
             },
             "max_context": {
               "type": "integer"

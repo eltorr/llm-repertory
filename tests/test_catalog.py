@@ -192,6 +192,10 @@ class SizingTests(unittest.TestCase):
         for m in DATA["models"]:
             q, f = sizing.QUANTS[m["quant"]], m["facts"]
             self.assertEqual((q["rec"], q["fixed0"]), (f["expert_bytes"], f["fixed_vram_bytes"]))
+            self.assertEqual((q["act"], q["topk"]), (f["prefill_act_bytes_per_token"], f["experts_per_token"]))
+            self.assertEqual(q["max_context"], min(f["max_context"], sizing.CONTEXT_LIMIT))
+            self.assertEqual(sizing.prefill_bytes(m["quant"], 1000, staging=False) - sizing.PREFILL_EXTRA,
+                             1000 * f["prefill_act_bytes_per_token"])
             self.assertEqual(sizing.expert_bytes(m["quant"]),
                              f["expert_bytes"] * f["experts_per_layer"] * f["moe_layers"])
             self.assertEqual(sizing.fixed_bytes(m["quant"], 1000, 8) - q["fixed0"],
@@ -201,6 +205,7 @@ class SizingTests(unittest.TestCase):
         # the calibration the tests in test_sizing.py check
         self.assertEqual(sizing.QUANTS["3.05"]["fixed0"], 6.15 * 1e9)
         self.assertEqual(sizing.QUANTS["4.05"]["fixed0"], 6.62 * 1e9)
+        self.assertEqual({sizing.QUANTS[q]["act"] for q in ("3.05", "4.05")}, {0.21e6})    # the RTX 4090 runs
 
 
 if __name__ == "__main__":

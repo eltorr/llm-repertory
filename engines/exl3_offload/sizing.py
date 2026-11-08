@@ -1,5 +1,5 @@
-"""VRAM and RAM sizing for the models this engine runs (today Qwen3.8-Flash-Next), as plain arithmetic (no torch, no
-GPU).
+"""VRAM and RAM sizing for the models this engine runs (Qwen3.8-Flash-Next, GLM-5.3-Flash), as plain arithmetic (no
+torch, no GPU).
 
 One source of truth for run.sh (`python3 engines/exl3_offload/sizing.py env ...`) and the Repertory manager. The
 per-model numbers come from the catalog (catalog/catalog.json, each model's facts); the engine's own constants and the
@@ -15,13 +15,14 @@ Where VRAM goes (code refs: glm53-flash-offload/glm53/expert_cache.py, nv2.py; e
             extra.
 A plan fits when fixed + cache + reserve <= budget and cache + reserve - 0.35 GB >= prefill(chunk).
 
-Calibration (research/vram-scaling): VRAM used outside the expert cache measured 9.0 GB (3.05 bpw) and 9.44 GB
-(4.05 bpw) at 262,144 context and 6.85 GB at 64K (3.05), i.e. 6.15 / 6.62 GB (the catalog's fixed_vram_bytes) plus
-the KV cache's 10,752 bytes per token (kv_bytes_per_token); an 8 GB-class run used 6.39 GB at 16K. Activations per
-chunk token come from RTX 4090 runs published with MaxDevv/lean-qwenflash, which this project began as a fork of (a
-24,576-token chunk fit with a 16 GB cap:
+Calibration, Qwen3.8-Flash-Next (research/vram-scaling): VRAM used outside the expert cache measured 9.0 GB (3.05 bpw)
+and 9.44 GB (4.05 bpw) at 262,144 context and 6.85 GB at 64K (3.05), i.e. 6.15 / 6.62 GB (the catalog's
+fixed_vram_bytes) plus the KV cache's 10,752 bytes per token (kv_bytes_per_token); an 8 GB-class run used 6.39 GB at
+16K. Activations per chunk token (prefill_act_bytes_per_token) come from RTX 4090 runs published with
+MaxDevv/lean-qwenflash, which this project began as a fork of (a 24,576-token chunk fit with a 16 GB cap:
 https://github.com/MaxDevv/lean-qwenflash/tree/fa9a772d9aa9b94a5653a2c6880eeb97af0d2e9d/research/4090-long). The
 reserves include ~0.3 GB of margin found by running long prompts on emulated 8-16 GB cards.
+GLM-5.3-Flash's numbers are not measured here yet: the catalog entry says where each comes from.
 
 baseline() turns a card and an amount of RAM into the starting configuration (quant, context, RAM cache, the
 manager's RAM thresholds); `python3 engines/exl3_offload/sizing.py presets` prints the README's preset and
@@ -42,38 +43,39 @@ from repertory import catalog  # noqa: E402
 GB = 1e9
 GIB = 1024 ** 3
 ENGINE = "exl3-offload"               # this adapter's engine in the catalog
-# Measured on Qwen3.8-Flash-Next and kept here, not in the catalog, until a second model shows how it varies: the
-# activations per prompt token of a prefill chunk (they depend on the model's width). The RTX 4090 runs above: a
-# 24,576-token chunk fit, 32,768 did not.
-ACT_BYTES_PER_TOKEN = 0.21e6
 PREFILL_EXTRA = 0.3 * GB
 FRAGMENTATION = 0.5 * GB   # torch held 0.8-1 GB more than it used when staging was allocated on small cards
 ELASTIC_SLACK = 0.35 * GB
-CHUNKS = (24576, 16384, 8192, 4096, 2048)   # below 2,048 staging-free 1,536-token chunks do better
+CHUNKS = (24576, 16384, 8192, 4096, 2048)   # below 2,048 staging-free chunks do better
 # The VRAM and RAM caches together hold this share of the experts; the rest, picked rarely, comes from NVMe. At 4.05 bpw
 # on the whole card, 89% and 100% ran alike (research/vram-scaling-torch-2.15: 60.9 and 61.0 tok/s, 1% of picks from
 # NVMe in both), and the last 11% took 6 GiB of RAM.
 RAM_COVERAGE = 0.9
-# Forwards with fewer expert picks per layer than this skip prefill staging, which costs ~5.5 s whatever the prompt's
-# size (research/vram-scaling-torch-2.15). nv2's pick buffer holds 16,384: 1,638 tokens at 10 experts each. Both are
-# the engine's, sized for Qwen's 10 experts per token; they stay here until a model with another top-k is added.
+# nv2's pick buffer (glm53/nv2.py, sel_out): the expert picks (tokens x top-k) one layer call takes without staging.
+# Forwards with fewer picks than this skip prefill staging, which costs ~5.5 s whatever the prompt's size
+# (research/vram-scaling-torch-2.15): prompts under 1,638 tokens for Qwen's top-10, 2,048 for GLM's top-8.
 STAGE_MIN_PICKS = 16384
-NO_STAGE_CHUNK = 1536           # without staging, nv2's pick buffer limits a chunk to 1,638 tokens
+# The longest context the manager runs (repertory/config.py MAXIMUM; a test checks they agree). A model whose config
+# allows more (GLM-5.3-Flash: 1,048,576) is sized up to this.
+CONTEXT_LIMIT = 262144
 
 
 def _quants():
     """The catalog's models for this engine, by quant, as sizing uses them. rec: one expert record (gate + up + down
-    trellis, 256-aligned); fixed0: non-expert VRAM at zero context; kv: KV cache bytes per token by KV bits."""
+    trellis, 256-aligned); fixed0: non-expert VRAM at zero context; kv: KV cache bytes per token by KV bits; act:
+    activations per prompt token of a prefill chunk; topk: experts per token."""
     out = {}
     for m in catalog.load().models_for(ENGINE):
         f = m["facts"]
         out[m["quant"]] = {
             "rec": f["expert_bytes"], "fixed0": float(f["fixed_vram_bytes"]),
             "experts_per_layer": f["experts_per_layer"], "moe_layers": f["moe_layers"],
+            "topk": f["experts_per_token"], "act": f["prefill_act_bytes_per_token"],
             "kv": {int(bits): n for bits, n in f["kv_bytes_per_token"].items()},
-            "max_context": f["max_context"], "model_dir": m["paths"]["model_dir"], "store": m["paths"]["store"],
-            "branch": m["source"].get("branch"), "download_gb": m["disk"]["download_gb"],
-            "store_gb": m["disk"]["prepared_gb"], "label": m["label"], "model": m["id"]}
+            "max_context": min(f["max_context"], CONTEXT_LIMIT), "model_dir": m["paths"]["model_dir"],
+            "store": m["paths"]["store"], "branch": m["source"].get("branch"),
+            "download_gb": m["disk"]["download_gb"], "store_gb": m["disk"]["prepared_gb"], "label": m["label"],
+            "model": m["id"]}
     return out
 
 
@@ -101,11 +103,18 @@ def stage_bytes(quant):
 
 
 def prefill_bytes(quant, chunk, staging=True):
-    return (stage_bytes(quant) if staging else 0) + ACT_BYTES_PER_TOKEN * chunk + PREFILL_EXTRA
+    return (stage_bytes(quant) if staging else 0) + QUANTS[quant]["act"] * chunk + PREFILL_EXTRA
+
+
+def nostage_chunk(quant):
+    """The largest staging-free prefill chunk: whole 256-token pages whose picks stay below nv2's pick buffer (1,536
+    tokens at Qwen's top-10, 1,792 at GLM's top-8)."""
+    return (STAGE_MIN_PICKS // QUANTS[quant]["topk"] - 1) // 256 * 256
 
 
 SMALL_CARD = 16 * GB
-# the reserve and elastic share engine_env sets on budgets of 16 GB and more (tuned on the RTX 5090)
+# the reserve and elastic share engine_env sets on budgets of 16 GB and more (tuned on the RTX 5090 with Qwen; a plan
+# whose prefill needs a bigger elastic share gets it: elastic_gib)
 ENGINE_RESERVE_GIB = 1.7
 ENGINE_ELASTIC_GIB = 6.0
 
@@ -148,7 +157,7 @@ def plan(quant, budget, context=262144, kv_bits=4, chunk=None, max_slots=None):
             out.update(chunk=c, ok=True)
             return out
     # staging-free fallback: every miss is read zero-copy from pinned RAM (supported by nv2, not yet measured)
-    c = min(chunk or NO_STAGE_CHUNK, NO_STAGE_CHUNK)
+    c = min(chunk or nostage_chunk(quant), nostage_chunk(quant))
     r = nostage_reserve(quant, c)
     if budget >= fixed + r:
         cache = max(0.0, budget - fixed - r)
@@ -170,8 +179,8 @@ def min_budget(quant, context, kv_bits=4):
 
 
 def max_context(quant, budget, kv_bits=4, step=16384, staging=True):
-    """Largest context (multiple of `step`, at most the model's max_context: 262,144 for Qwen) that still leaves a
-    workable plan, with staged prefill (or, with staging=False, in either prefill mode)."""
+    """Largest context (multiple of `step`, at most the model's max_context and CONTEXT_LIMIT: 262,144) that still
+    leaves a workable plan, with staged prefill (or, with staging=False, in either prefill mode)."""
     best = 0
     for ctx in range(step, QUANTS[quant]["max_context"] + 1, step):
         p = plan(quant, budget, ctx, kv_bits)
@@ -201,8 +210,16 @@ def engine_env(p, cap_slots=False):
                     "GLM53_EC_ELASTIC_GB": f"{max(6.0, p['cache'] / GIB + 1):.1f}"})
     else:
         env.update({"GLM53_EC_RESERVE_GB": f"{ENGINE_RESERVE_GIB:.2f}",
-                    "GLM53_EC_ELASTIC_GB": f"{ENGINE_ELASTIC_GIB:.1f}"})
+                    "GLM53_EC_ELASTIC_GB": f"{elastic_gib(p):.1f}"})
     return env
+
+
+def elastic_gib(p):
+    """The share of the VRAM cache the engine may lend each prefill on a 16 GB+ budget, in GiB: ENGINE_ELASTIC_GIB, or
+    what the plan's prefill takes beyond the reserve where that is more (its staging buffers and a chunk's
+    activations). Qwen's always fit in 6 GiB; GLM's two staging buffers alone take 5.4 GB."""
+    need = (prefill_bytes(p["quant"], p["chunk"]) - ENGINE_RESERVE_GIB * GIB) / GIB
+    return max(ENGINE_ELASTIC_GIB, math.ceil(need * 10) / 10)
 
 
 def live_resize_args(p, cap_slots=False):
@@ -272,7 +289,7 @@ def ram_cache_gib(need, ram_avail, policy, overhead, cap_gib=None):
 
 def nostage_min_budget(quant, context, kv_bits=4):
     """Smallest budget at all: staging-free prefill and an empty expert cache."""
-    return fixed_bytes(quant, context, kv_bits) + nostage_reserve(quant, NO_STAGE_CHUNK)
+    return fixed_bytes(quant, context, kv_bits) + nostage_reserve(quant, nostage_chunk(quant))
 
 
 def best_context_plan(quant, budget, kv_bits=4):
@@ -539,9 +556,18 @@ def main(argv=None):
     s = sub.add_parser("presets", help="the README's preset and measurement tables (markdown)")
     s.add_argument("--platform", default="linux", choices=sorted(PLATFORMS))
     s.add_argument("--write", metavar="README", help="update the tables in this file instead of printing them")
+    s = sub.add_parser("model", help="a catalog model's folder, expert store and expert bytes, as run.sh reads them")
+    s.add_argument("--quant", required=True, choices=sorted(QUANTS))
     a = ap.parse_args(argv)
     if (sys.stdout.encoding or "").lower().replace("-", "") != "utf8":
         sys.stdout.reconfigure(encoding="utf-8")   # the tables use ✅ / ⚪; a Windows pipe defaults to cp1252
+    if a.cmd == "model":
+        # shell for run.sh: MODEL_DIR and STORE unless set (the catalog's paths are plain characters only:
+        # catalog.problems checks them), and every routed expert's bytes
+        q = QUANTS[a.quant]
+        print(f': "${{MODEL_DIR:=./{q["model_dir"]}}}" "${{STORE:=./{q["store"]}}}"; '
+              f'EXPERT_BYTES={expert_bytes(a.quant)}')
+        return 0
     if a.cmd == "presets":
         if a.write:
             update_readme(a.write)

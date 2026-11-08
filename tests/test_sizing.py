@@ -126,6 +126,24 @@ class SizingTests(unittest.TestCase):
         self.assertIn("GLM53_EC_MAX_SLOTS", sizing.engine_env(p, cap_slots=True))
         self.assertNotIn("GLM53_EC_MAX_SLOTS", sizing.engine_env(sizing.plan("3.05", 28 * GB), cap_slots=False))
 
+    def test_qwens_prefill_constants_are_as_measured(self):
+        # the activations of the RTX 4090 runs, staging-free chunks of 1,536 (1,638 tokens x top-10 fill the pick
+        # buffer) and the 6 GiB elastic share: what the derived values give for Qwen
+        self.assertEqual(sizing.prefill_bytes("3.05", 24576, staging=False), 0.21e6 * 24576 + 0.3e9)
+        self.assertEqual((sizing.nostage_chunk("3.05"), sizing.nostage_chunk("4.05")), (1536, 1536))
+        for q in ("3.05", "4.05"):
+            for budget in (16, 20, 24, 28, 29.5, 34):
+                p = sizing.plan(q, budget * GB, 262144)
+                self.assertEqual(sizing.engine_env(p)["GLM53_EC_ELASTIC_GB"], "6.0", (q, budget))
+
+    def test_the_context_limit_is_the_managers(self):
+        import os
+        import tempfile
+        if "repertory.config" not in sys.modules:                       # never a real settings dir
+            os.environ["REPERTORY_HOME"] = tempfile.mkdtemp(prefix="repertory-test-")
+        from repertory import config
+        self.assertEqual(sizing.CONTEXT_LIMIT, config.MAXIMUM["context"])
+
 
 if __name__ == "__main__":
     unittest.main()

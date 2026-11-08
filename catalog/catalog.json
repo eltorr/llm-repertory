@@ -202,6 +202,7 @@
           "8": 16896,
           "16": 28416
         },
+        "prefill_act_bytes_per_token": 210000,
         "max_context": 262144,
         "mtp": true
       },
@@ -454,6 +455,7 @@
           "8": 16896,
           "16": 28416
         },
+        "prefill_act_bytes_per_token": 210000,
         "max_context": 262144,
         "mtp": true
       },
