@@ -19,6 +19,10 @@ What changed in Repertory, newest first.
   GLM-5.3-Flash stopped took the PC down to 4 GB free. The manager and each benchmark run now start once Windows has
   all but a fifth (or 4 GB) of it back, waiting up to 90 s; until now only a start whose RAM cache couldn't be sized
   yet waited, for 30 s. Switching models takes up to a minute longer.
+- **Measured** (RTX 5090, 64 GB RAM, WSL2): switching from Qwen 4.05 to GLM-5.3-Flash 2.05 left at least 5.8 GB
+  free, against 1.4 GB before; that low point is now at the end of the RAM cache's allocation, about 3 GB under
+  where it settles (8.8 GB) while Windows catches up. Switching back left at least 11.7 GB free (it settles at 14.6),
+  against 2.9-4.4 GB. Each switch waited 36-48 s for the RAM; the engine still starts in 64-68 s.
 
 ## 2026-11-08: Benchmark page and the head-to-head
 

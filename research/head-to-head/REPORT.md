@@ -75,10 +75,11 @@ What went wrong:
 - **2.05 bpw makes careless mistakes.** Both of GLM 2.05's failures are slips in otherwise right work (a list end,
   a rounding step), the kind a 2-bit quant is expected to add. GLM 3.05's were a logic slip and a timeout.
 
-- **Starting GLM 2.05 squeezes this PC's RAM.** With the 40 GiB RAM cache the manager gives it, free RAM was 9.6 GB
-  once it had settled, but loading took it down to 1.4 GB, from 54 GB free with nothing loaded (page cache from
-  loading on top of the cache; it drains once the server is up). Curation's benchmark run stepped aside for it
-  twice and its third try was cancelled, so GLM 2.05's regression check is still to do.
+- **Starting GLM 2.05 squeezed this PC's RAM; it no longer does.** With the 40 GiB RAM cache the manager gives it,
+  loading took free RAM down to 1.4 GB, from 54 GB with nothing loaded: the page cache from loading sat on top of
+  the cache. Curation's benchmark run stepped aside for it twice and its third try was cancelled, so GLM 2.05's
+  regression check is still to do. Since the fixes in the [CHANGELOG](../../CHANGELOG.md) ("Starting a model leaves
+  the PC its RAM"), switching to it leaves at least 5.8 GB free, and 8.8 GB once it has settled.
 
 One run per task is a small sample: a second run could flip any of these. To settle it, repeat the coding tasks
 (about 12 minutes a round on GLM 2.05, 45 on Qwen 4.05 at xhigh), and try Qwen at `medium`, which may keep its
