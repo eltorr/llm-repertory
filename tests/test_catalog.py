@@ -165,8 +165,9 @@ class SaveTests(unittest.TestCase):
             catalog.save_curation("qwen3.8-flash-next-exl3-3.05", cur, p)
             got = json.loads(p.read_text(encoding="utf-8"))
             self.assertEqual(got["models"][0]["curation"], cur)
-            got["models"][0].pop("curation")
-            self.assertEqual(got, DATA)
+            want = copy.deepcopy(DATA)                                      # the entry's record replaced, and only it
+            want["models"][0]["curation"] = cur
+            self.assertEqual(got, want)
             self.assertEqual(catalog.status(catalog.load(p).model("3.05")), "untested")
             with self.assertRaises(catalog.CatalogError):                  # checked before it is written
                 catalog.save_curation("qwen3.8-flash-next-exl3-3.05", {"status": "fine"}, p)

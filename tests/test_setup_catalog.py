@@ -26,9 +26,11 @@ POSIX_BASH = sys.platform != "win32" and shutil.which("bash")
 
 
 def with_curation(**states):
-    """A catalog whose models (by quant) carry these curation states."""
+    """A catalog whose models (by quant) carry these curation states, and the others none (untested), whatever the
+    real catalog's results are."""
     data = copy.deepcopy(DATA)
     for m in data["models"]:
+        m.pop("curation", None)
         if m["quant"] in states:
             m["curation"] = {"status": states[m["quant"]], "date": "2026-11-07", "checks": {}}
     return catalog.Catalog(data)
@@ -43,6 +45,9 @@ def setup_for(cfg=None):
 @mock.patch.object(setup_mod, "IS_WINDOWS", False)
 class ModelStepTests(unittest.TestCase):
     def test_one_step_per_model_with_its_label_sizes_paths_and_pin(self):
+        patcher = mock.patch.object(catalog, "load", with_curation)      # untested, whatever the real results
+        patcher.start()
+        self.addCleanup(patcher.stop)
         steps = {s["id"]: s for s in setup_mod.model_steps()}
         self.assertEqual(list(steps), ["m305", "m405"])
         s = steps["m305"]
@@ -122,7 +127,8 @@ class DashboardTests(unittest.TestCase):
 
     def test_the_model_choices_and_the_served_name_come_from_the_catalog(self):
         svc, Service = self.service(quant="4.05")
-        choices = Service.model_choices(svc)
+        with mock.patch.object(catalog, "load", with_curation):          # untested, whatever the real results
+            choices = Service.model_choices(svc)
         self.assertEqual([(c["quant"], c["label"], c["curation"]) for c in choices],
                          [("3.05", "3.05 bpw (fastest)", "untested"),
                           ("4.05", "4.05 bpw (higher fidelity)", "untested")])

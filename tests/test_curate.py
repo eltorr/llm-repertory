@@ -12,6 +12,7 @@ import math
 import os
 import random
 import re
+import shutil
 import sys
 import tempfile
 import threading
@@ -915,8 +916,9 @@ class ResultTests(unittest.TestCase):
         self.assertFalse(catalog.offered(catalog.load(path).model(M405)))
         # and nothing else in the catalog changed
         got = json.loads(path.read_text(encoding="utf-8"))
-        got["models"][1].pop("curation")
-        self.assertEqual(got, DATA)
+        want = copy.deepcopy(DATA)                                          # the entry's record replaced, and only it
+        want["models"][1]["curation"] = got["models"][1]["curation"]
+        self.assertEqual(got, want)
         # --no-write
         before = path.read_text(encoding="utf-8")
         curate.run(M305, checks="compat", write=False, **kw)
@@ -924,6 +926,19 @@ class ResultTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def setUp(self):
+        # the catalog as before any curation: what the listing shows doesn't follow the real catalog's results
+        root = tempfile.mkdtemp(prefix="repertory-cat-")
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        data = copy.deepcopy(DATA)
+        for m in data["models"]:
+            m.pop("curation", None)
+        path = Path(root) / "catalog.json"
+        path.write_text(json.dumps(data, indent=1), encoding="utf-8", newline="\n")
+        patcher = mock.patch.object(catalog, "CATALOG", path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def cli(self, *args):
         import contextlib
         from repertory import __main__ as cli
