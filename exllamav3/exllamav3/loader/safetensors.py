@@ -9,6 +9,7 @@ import numpy as np
 import json
 import itertools
 from ..util import Timer
+from .page_cache import drop_read
 from ..ext import exllamav3_ext as ext
 from functools import cached_property
 import time
@@ -905,6 +906,7 @@ class SafetensorsCollection:
                         bytesize,
                         tensor,
                     )
+                    drop_read([filename], [(0, offset + beg, bytesize)])
                     if tensor.dtype == torch.bfloat16 and not allow_bf16:
                         tensor = tensor.to(torch.float16)
                     if tensor.dtype == torch.float and float2half:
@@ -1022,6 +1024,7 @@ class SafetensorsCollection:
                     torch.from_numpy(np.ascontiguousarray(loads)),
                     chunk,
                 )
+                drop_read(self.deferred_files, loads[:, [_COL_FILE, _COL_OFFSET, _COL_SIZE]].tolist())
 
             # Loads that went through a staging tensor (transpose, padding or fp32->fp16)
             for key, src, dest, transpose in self.deferred_finalize:

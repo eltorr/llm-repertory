@@ -10,6 +10,10 @@ What changed in Repertory, newest first.
   weights before allocating the RAM cache, but with a relative model folder (`./model-4.05`) every path it tried was
   wrong, and the log said `DONTNEED on 0 checkpoint files`. Now it drops the shards and the pre-read libraries (all
   but the pages in use) right before the RAM cache is allocated, and logs the page cache before and after.
+- **The weights leave the page cache as they load.** exllamav3's loader drops each batch's bytes once its tensors
+  are in place (only the ranges read, so a streamed n-gram table keeps its cached rows; `EXL3_LOAD_KEEP_CACHE=1`
+  keeps them). This matters when switching models: WSL takes about half a minute to hand the last model's RAM back
+  to Windows, and the next model's load used to add up to 10 GB of page cache in that time.
 
 ## 2026-11-08: Benchmark page and the head-to-head
 
