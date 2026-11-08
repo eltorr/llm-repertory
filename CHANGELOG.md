@@ -26,8 +26,14 @@ What changed in Repertory, newest first.
 - **Checking a download** drops what it read from the page cache, as downloading already did: hashing a 100 GB
   model no longer fills RAM next to a running model. The files check ignores the resume files QwenFlash's
   downloader left beside each file (`FILE.http-state.json`).
-- **Curation compares tokens, not text:** a near tie can flip a greedy answer when the MoE path adds the experts in
-  another order, so the regression check now teacher-forces the reference's own answers, as token ids, on the new run
+- **A benchmark started while the last one was starting the model again** measured the model, not its own run:
+  that start (waiting for WSL to hand RAM back first) took the run's server for a stray, stopped it and started the
+  model on the same port. This is how the first 3.05 reference came to hold the 4.05 model's answers. A benchmark now
+  waits for the last one's start, and a run whose server isn't the one it launched is an error, not a result.
+- **Curation compares tokens, not text:** exact text fails any change that moves logits in their last bits (the CPU
+  lane, a kernel adding experts in another order, a new exllamav3), since a near tie then flips a greedy answer, and
+  it can't tell that from a real regression. The regression check now teacher-forces the reference's own answers,
+  as token ids, on the new run
   and compares each position's 20 likeliest tokens with the reference's: per answer, at least 98% top-1 agreement
   and a mean KL of at most 0.002 (starting values, to be calibrated on the GPU). The document's answer must name its
   facts; identical text is reported only. References gain the token data; one recorded before has to be recorded

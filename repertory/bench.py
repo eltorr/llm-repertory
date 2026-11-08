@@ -106,6 +106,7 @@ SETTLE_S = 3                        # after stopping a server, before reading fr
 WATCH_S = 1.0                       # how often a run checks whether the PC needs the GPU or RAM back
 YIELD_AFTER_S = 10                  # how long the PC must need them before the run steps aside
 MAX_YIELDS = 3                      # a run interrupted more often is recorded as interrupted (resume redoes it)
+REPLACED = "another model server replaced this run's on its port: what was measured may be that server's"
 RAM_FLOOR_GB = 1.0                  # free RAM below this: the PC is about to run out
 PLAN = "_plan.json"                 # the benchmark's runs and workload, for resuming (not a result)
 
@@ -623,7 +624,7 @@ class Bench:
 
     def __init__(self, svc):
         self.svc = svc
-        self.running = self.cancelled = False
+        self.running = self.cancelled = self.waiting_for_last = False
         self.out = collections.deque(maxlen=3000)
         self.seq = 0
         self.runs, self.records = [], []
@@ -699,7 +700,7 @@ class Bench:
         self.planned = len(done) + len(runs)
         self.started, self.finished, self.current = time.time(), None, None
         self.out.clear()
-        self.task = asyncio.create_task(self._run())
+        self.task = asyncio.create_task(self._run(self.task))
         n = f"{len(runs)} run{'s' if len(runs) > 1 else ''}"
         if folder:
             return True, f"resuming the benchmark of {folder.name}: {n} left, {workload} workload"
@@ -709,12 +710,23 @@ class Bench:
         if not self.running:
             return False, "no benchmark is running"
         self.cancelled = True
+        if self.waiting_for_last:                   # the server running is the model's, starting again: not ours
+            self.emit("cancelling")
+            return True, "cancelling"
         self.emit("cancelling: stopping the benchmark's model server")
         await asyncio.to_thread(self.svc.host.backend_stop)
         return True, "cancelling"
 
-    async def _run(self):
+    async def _run(self, last=None):
         svc = self.svc
+        if last and not last.done():
+            # The last benchmark is still starting the model again (after a stop, the start first waits for WSL to
+            # hand RAM back). A run's server started now would be taken for a stray by that start, stopped, and
+            # replaced by the model on the same port: wait for it, then stop the model as any benchmark does.
+            self.waiting_for_last = True
+            self.emit("waiting for the model to finish starting again after the last benchmark")
+            await asyncio.wait([last])
+            self.waiting_for_last = False
         before = svc.be.tier if svc.be.state in ("running", "starting") else None
         try:
             self.dir = self.resume_dir or new_run_dir()
@@ -787,6 +799,12 @@ class Bench:
         if m["ram_avail"] < RAM_FLOOR_GB * GB:
             why.append(f"RAM nearly out ({m['ram_avail'] / GB:.1f} GB free)")
         return why
+
+    async def own_server(self, pid):
+        """Whether the model server running is still the one this run started (the launcher's pid), not another one
+        started on the same port since: the manager's own start takes a server it didn't start for a stray."""
+        st, now = await asyncio.to_thread(self.svc.host.backend_status)
+        return st == "running" and now == pid
 
     async def watch(self):
         """While a run's server is up: once the PC has needed the GPU or RAM for YIELD_AFTER_S, stop the server. The
@@ -902,15 +920,17 @@ class Bench:
                                           ["server"])
         watcher = asyncio.create_task(self.watch()) if ok else None
         try:
-            up = False
+            up = replaced = False
             if ok:
                 url = f"http://127.0.0.1:{cfg['backend_port']}/v1/models"
                 while time.time() - t0 < cfg["start_timeout_s"] and not self.cancelled and not self.yielded:
                     if await asyncio.to_thread(http_ok, url, 2.0, svc.backend_auth):
-                        up = True
+                        up = await self.own_server(pid)        # what answers on the port must be this run's server
+                        replaced = not up
                         break
-                    st, _ = await asyncio.to_thread(svc.host.backend_status)
-                    if st != "running":
+                    st, now = await asyncio.to_thread(svc.host.backend_status)
+                    if st != "running" or now != pid:
+                        replaced = st == "running"
                         break
                     await asyncio.sleep(2)
             rec["startup_s"] = round(time.time() - t0, 1)
@@ -926,11 +946,14 @@ class Bench:
                     rec["engine"] = await asyncio.to_thread(client.engine_stats)
                 except Exception as e:  # noqa: BLE001 - one failed run must not end the others
                     rec["error"] = self.why_stopped(f"workload failed: {e}")
-                st, _ = await asyncio.to_thread(svc.host.backend_status)
-                if st != "running" and not rec.get("error"):
+                st, now = await asyncio.to_thread(svc.host.backend_status)
+                if st == "running" and now != pid:
+                    rec["error"] = REPLACED                     # whatever it measured may be the other server's
+                elif st != "running" and not rec.get("error"):
                     rec["error"] = "the server exited during the workload"
             else:
-                rec["error"] = self.why_stopped(f"the server did not come up{'' if ok else f' (launcher: {pid})'}")
+                rec["error"] = self.why_stopped(REPLACED if replaced else
+                                                f"the server did not come up{'' if ok else f' (launcher: {pid})'}")
         finally:
             if watcher:
                 watcher.cancel()

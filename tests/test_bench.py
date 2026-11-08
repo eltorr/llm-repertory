@@ -450,6 +450,44 @@ class BenchTests(unittest.TestCase):
         self.assertIsNotNone(r["previous"])
         self.assertIsInstance(r["previous"]["decode_pct"], float)
 
+    def test_a_benchmark_started_while_the_last_one_starts_the_model_again_waits_for_it(self):
+        log, start, host_start = [], self.svc.start, self.svc.host.backend_start
+
+        async def slow_start(tier, reason):
+            log.append("model starting")
+            await asyncio.sleep(0.5)                       # as the manager waits for WSL to hand RAM back
+            log.append("model started")
+            return await start(tier, reason)
+        self.svc.start = slow_start
+        self.svc.host.backend_start = lambda env, args: (log.append("run's server"), host_start(env, args))[1]
+        b = bench.Bench(self.svc)
+
+        async def go():
+            self.assertTrue(b.start(["current"], "quick")[0])
+            while b.running:
+                await asyncio.sleep(0.01)
+            first = b.task
+            ok, msg = b.start(["current"], "quick")        # the first is still starting the model again
+            self.assertTrue(ok, msg)
+            self.assertFalse(first.done())
+            await b.task
+        asyncio.run(go())
+        self.assertEqual(log, ["run's server", "model starting", "model started"] * 2)
+        self.assertEqual(self.svc.stopped, ["benchmark", "benchmark"])   # the second stopped the model it started
+        self.assertIsNone(b.records[0].get("error"), b.records[0].get("error"))
+
+    def test_a_run_whose_server_was_replaced_on_its_port_is_an_error(self):
+        self.svc.host.backend_status = lambda: ("running", 999)          # not the pid the run's launch gave
+        r = self.run_bench(["current"]).records[0]
+        self.assertEqual(r["error"], bench.REPLACED)
+        self.assertNotIn("decode_tps_median", r)
+
+    def test_a_server_replaced_during_the_workload_spoils_the_run(self):
+        calls = []
+        self.svc.host.backend_status = lambda: (calls.append(1), ("running", 4242 if len(calls) == 1 else 999))[1]
+        r = self.run_bench(["current"]).records[0]
+        self.assertEqual(r["error"], bench.REPLACED)
+
     def test_cancel(self):
         FakeEngine.slow = 0.2
         b = self.run_bench(["current", "3.05:22:65536"], cancel_after=0.5)
