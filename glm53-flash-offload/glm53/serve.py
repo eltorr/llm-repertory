@@ -18,7 +18,10 @@ Endpoints
   POST /v1/chat/completions  (Chat Completions on the same pipeline, stream or not; tools -> tool_calls;
                              chat_template_kwargs.enable_thinking / reasoning_effort; reasoning in reasoning_content)
   POST /v1/completions       (raw prompt, stream or not)
-  POST /generate, /tokenize  (SGLang-shaped, used by the benchmark and quality tools; return_logprob = teacher-forced)
+  POST /generate, /tokenize  (SGLang-shaped, used by the benchmark and quality tools; return_logprob = teacher-forced;
+                             a whole answer comes with its output_ids)
+  POST /prepare              (a Chat Completions or Responses body -> {"ids": the prompt's token ids, as the chat
+                             routes run it}: for replaying a turn through /generate)
 No output caps: max_tokens defaults to the remaining context. A prompt that leaves no room for an answer is refused
 before it runs (HTTP 400, code context_length_exceeded), and so is a body that is not a request or a conversation the
 chat template refuses (chat_prompt raising ValueError), all in OpenAI's error shape. Usage reports the prompt tokens
@@ -221,6 +224,7 @@ def check_room(ids):
 
 
 CACHED = contextvars.ContextVar("cached_tokens", default=0)   # set by run_job, in the request's own context
+OUTPUT = contextvars.ContextVar("output_ids", default=())     # likewise
 
 
 def cached_tokens():
@@ -228,9 +232,15 @@ def cached_tokens():
     return CACHED.get()
 
 
+def output_ids():
+    """The last job's answer as token ids, the token that ended it included (run_job collects them)."""
+    return list(OUTPUT.get())
+
+
 async def run_job(ids, sp, stop_strings=None):
     """Yields (text so far, completion tokens, finish or None) once per generator step. ContextFull before anything
-    runs when the prompt leaves no room for an answer; when it ends, cached_tokens() has its prefix-cache hits."""
+    runs when the prompt leaves no room for an answer; when it ends, cached_tokens() has its prefix-cache hits and
+    output_ids() its token ids."""
     gen = G["gen"]
     room = check_room(ids)
     max_new = sp.get("max_new_tokens")
@@ -240,6 +250,8 @@ async def run_job(ids, sp, stop_strings=None):
     # context, so a second concurrent job never starts and C2/C4 run one stream after another.
     rq = int(os.environ.get("GLM53_MAX_RQ_TOKENS", "0")) or None
     CACHED.set(0)
+    out = []
+    OUTPUT.set(out)
     job = AsyncJob(gen, input_ids=ids, max_new_tokens=max(1, max_new), sampler=make_sampler(sp),
                    stop_conditions=list(EOS) + list(stop_strings or []), decode_special_tokens=False,
                    **({"max_rq_tokens": rq} if rq else {}))
@@ -252,9 +264,15 @@ async def run_job(ids, sp, stop_strings=None):
             chunk = r.get("text") or ""
             tids = r.get("token_ids")
             n += int(tids.numel()) if tids is not None else (1 if chunk else 0)
+            if tids is not None:
+                out += tids.flatten().tolist()
             text += chunk
             fin = None
             if r.get("eos"):
+                # a stop token ends the answer held back (with anything held just before it): exllamav3's "held"
+                held = (r.get("held") or {}).get("token_ids")
+                if held is not None:
+                    out += held.flatten().tolist()
                 # exllamav3's new_tokens restarts at every max_rq_tokens requeue (GLM53_MAX_RQ_TOKENS), so for answers longer
                 # than one page round it under-reports; the streamed count n covers the whole answer
                 n = max(n, int(r.get("new_tokens", 0)))
@@ -275,24 +293,32 @@ async def run_job(ids, sp, stop_strings=None):
 
 
 def teacher_forced(ids, start, topn, want_ids):
-    with torch.inference_mode():
-        logits = model.forward(ids, {"attn_mode": "flash_attn_nc"}).float()[0]
-    lp = torch.log_softmax(logits, -1)
+    """One forward pass over ids, no cache: for each token from `start` on, the distribution that predicted it (its
+    top `topn`, the ids in want_ids, and the token itself), and the one after the last token. Only the rows from
+    start - 1 on reach the logits head (last_tokens_only), so the prompt before them costs no logits memory; they are
+    sliced here too, for a forward that gives every row."""
     L = ids.shape[-1]
+    first = min(max(start - 1, 0), L - 1)
+    with torch.inference_mode():
+        logits = model.forward(ids, {"attn_mode": "flash_attn_nc", "last_tokens_only": L - first})[0, first - L:]
+        logits = logits.float()
+    lp = torch.log_softmax(logits, -1)
 
     def dist(row):
-        v, ix = lp[row].topk(topn)
+        v, ix = lp[row - first].topk(topn)
         top = [[float(a), int(b), None] for a, b in zip(v.tolist(), ix.tolist())]
-        sel = [[float(lp[row, t]), int(t), None] for t in want_ids] if want_ids else []
+        sel = [[float(lp[row - first, t]), int(t), None] for t in want_ids] if want_ids else []
         return top, sel
-    in_top, in_ids = [], []
+    in_top, in_ids, in_tok = [], [], []
     for t in range(start, L):
         if t == 0:
-            in_top.append(None); in_ids.append(None); continue
+            in_top.append(None); in_ids.append(None); in_tok.append(None); continue
         a, b = dist(t - 1); in_top.append(a); in_ids.append(b)
+        tid = int(ids[0, t]); in_tok.append([float(lp[t - 1 - first, tid]), tid, None])
     o_top, o_ids = dist(L - 1)
-    return {"input_top_logprobs": in_top, "input_token_ids_logprobs": in_ids, "output_top_logprobs": [o_top],
-            "output_token_ids_logprobs": [o_ids], "next_token": int(lp[L - 1].argmax())}
+    return {"input_token_logprobs": in_tok, "input_top_logprobs": in_top, "input_token_ids_logprobs": in_ids,
+            "output_top_logprobs": [o_top], "output_token_ids_logprobs": [o_ids],
+            "next_token": int(lp[L - 1 - first].argmax())}
 
 
 def sse(obj):
@@ -330,8 +356,8 @@ async def generate(req: Request):
             await asyncio.sleep(0.05)
         r = teacher_forced(ids, int(body.get("logprob_start_len", 0)), int(body.get("top_logprobs_num", 20)),
                            body.get("token_ids_logprob") or [])
-        meta = {k: r[k] for k in ("input_top_logprobs", "input_token_ids_logprobs", "output_top_logprobs",
-                                  "output_token_ids_logprobs")}
+        meta = {k: r[k] for k in ("input_token_logprobs", "input_top_logprobs", "input_token_ids_logprobs",
+                                  "output_top_logprobs", "output_token_ids_logprobs")}
         meta.update({"prompt_tokens": ids.shape[-1], "completion_tokens": 1, "finish_reason": {"type": "length"}})
         return JSONResponse({"text": "", "output_ids": [r["next_token"]], "meta_info": meta})
     check_room(ids)
@@ -353,7 +379,8 @@ async def generate(req: Request):
     text, n, fin = "", 0, None
     async for text, n, fin in run_job(ids, sp):
         pass
-    return JSONResponse({"text": text, "meta_info": {"prompt_tokens": P, "completion_tokens": n, "finish_reason": fin}})
+    return JSONResponse({"text": text, "output_ids": output_ids(),
+                         "meta_info": {"prompt_tokens": P, "completion_tokens": n, "finish_reason": fin}})
 
 
 @app.post("/tokenize")
@@ -535,6 +562,26 @@ async def chat(req: Request):
     return JSONResponse({"id": cid, "object": "chat.completion", "created": created, "model": args.served_name,
                          "choices": [{"index": 0, "message": msg, "finish_reason": reason}],
                          "usage": chat_usage(P, n)})
+
+
+@app.post("/prepare")
+async def prepare(req: Request):
+    """The prompt's token ids for a Chat Completions body (messages) or a Responses one (input), from the chat routes'
+    own prepare_turn: the same template, tools and thinking setting. For replaying a turn through /generate as
+    token ids; like /generate, not an OpenAI route."""
+    try:
+        try:
+            body = await req.json()
+        except ValueError:
+            body = None
+        if isinstance(body, dict) and "messages" not in body and "input" in body:
+            body = responses_to_chat(body)[0]
+        if not isinstance(body, dict) or "messages" not in body:
+            raise RequestError("expected a JSON object with messages or input")
+        c = prepare_turn(body)
+    except ValueError as e:   # RequestError, a template's refusal, ContextFull
+        return request_error(e)
+    return JSONResponse({"ids": c["ids"][0].tolist()})
 
 
 @app.post("/v1/completions")

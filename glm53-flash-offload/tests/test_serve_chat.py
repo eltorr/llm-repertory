@@ -2,7 +2,8 @@
 sets are set, and run_job / chat_prompt / parse_tool_calls / startup are replaced the way a wrapper replaces them.
 Checks the SSE streams (reasoning, content streamed early, tool calls never as content), the non-streamed answers,
 and for both APIs: the context check, the prefix-cache figures in usage (the real run_job, on a fake job) and the 400s
-for a request that can't run. Needs torch (CPU) and fastapi; no GPU, no CUDA."""
+for a request that can't run. Then what replaying a turn as token ids uses: /prepare, /generate's output_ids and
+teacher forcing (on a fake model). Needs torch (CPU) and fastapi; no GPU, no CUDA."""
 import argparse
 import asyncio
 import importlib.util
@@ -280,6 +281,109 @@ class BothApis(Serve):
                 r = asyncio.run(getattr(self.serve, route)(FakeReq(body)))
                 err = json.loads(r.body)["error"]
                 self.assertEqual((r.status_code, err["message"]), (400, "invalid request"))   # its text: the log only
+
+
+class Chars:
+    """A tokenizer with a token per character, so a prompt's ids say what it was."""
+    def encode(self, text, encode_special_tokens=True):
+        import torch
+        return torch.tensor([[ord(c) for c in text]], dtype=torch.long)
+
+
+class TokenJob(Job):
+    """As Job, with exllamav3's token ids: one a step, and at the end the stop token, held back."""
+    IDS, STOP = (5, 6, 7), 2
+
+    async def __aiter__(self):
+        import torch
+        for t in self.IDS:
+            yield {"stage": "streaming", "text": "x", "token_ids": torch.tensor([[t]]), "eos": False}
+        yield {"stage": "streaming", "eos": True, "eos_reason": "stop_token", "new_tokens": len(self.IDS) + 1,
+               "held": {"token_ids": torch.tensor([[self.STOP]])}}
+
+
+@unittest.skipUnless(HAVE, "needs torch, fastapi, uvicorn")
+class Replay(Serve):
+    """A turn replayed as token ids: /prepare gives the prompt's ids as the chat routes build them, /generate the
+    answer's ids, and teacher forcing each answer token's logprob."""
+    CHAT = {"messages": [{"role": "user", "content": "hi"}], "tools": TOOLS,
+            "chat_template_kwargs": {"enable_thinking": False}}
+
+    @staticmethod
+    def prompt(messages, thinking, tools, kw):
+        return f"{thinking}|{bool(tools)}|{messages[-1]['content']}"
+
+    def ids(self, r):
+        self.assertEqual(r.status_code, 200)
+        return json.loads(r.body)["ids"]
+
+    def test_prepare_gives_the_ids_the_chat_routes_run(self):
+        s, ran = self.serve, []
+
+        async def run_job(ids, sp, stop_strings=None):
+            ran.append(ids[0].tolist())
+            yield "ok", 1, {"type": "stop", "reason": "eos"}
+        with mock.patch.multiple(s, tok=Chars(), chat_prompt=self.prompt, run_job=run_job):
+            for body in (self.CHAT, {"messages": [{"role": "user", "content": "hi"}]}):
+                ids = self.ids(asyncio.run(s.prepare(FakeReq(body))))
+                asyncio.run(s.chat(FakeReq(body)))
+                self.assertEqual(ids, ran[-1])
+            self.assertEqual("".join(map(chr, self.ids(asyncio.run(s.prepare(FakeReq(self.CHAT)))))), "False|True|hi")
+            # a Responses body: its chat-shaped turn, as /v1/responses runs it
+            body = {"input": "hi", "tools": [{"type": "function", "name": "get_weather"}]}
+            ids = self.ids(asyncio.run(s.prepare(FakeReq(body))))
+            asyncio.run(s.responses(FakeReq(body)))
+            self.assertEqual((ids, "".join(map(chr, ids))), (ran[-1], "True|True|hi"))
+
+    def test_prepare_refuses_what_the_chat_routes_refuse(self):
+        s = self.serve
+        for body in ({"model": "m"}, b"{not json", [1, 2]):
+            r = asyncio.run(s.prepare(FakeReq(body)))
+            self.assertEqual((r.status_code, json.loads(r.body)["error"]["message"]),
+                             (400, "expected a JSON object with messages or input"))
+        with mock.patch.object(s, "CTX", 20), mock.patch.object(s, "chat_prompt", lambda *a: "x" * 400):
+            r = asyncio.run(s.prepare(FakeReq(self.CHAT)))
+            self.assertEqual((r.status_code, json.loads(r.body)["error"]["code"]), (400, "context_length_exceeded"))
+
+    def test_a_whole_generate_answer_has_its_token_ids(self):
+        s = self.serve
+        with mock.patch.object(s, "AsyncJob", TokenJob):
+            r = asyncio.run(s.generate(FakeReq({"input_ids": [1, 2, 3], "sampling_params": {"temperature": 0}})))
+        out = json.loads(r.body)
+        self.assertEqual(out["output_ids"], [5, 6, 7, 2])                   # the stop token included
+        self.assertEqual((out["text"], out["meta_info"]["completion_tokens"]), ("xxx", 4))
+
+    def test_teacher_forcing_gives_each_tokens_own_logprob_from_the_rows_it_needs(self):
+        import torch
+        s = self.serve
+        ids, start, top = [3, 9, 1, 4, 8, 2, 6], 4, 5
+        table = torch.randn(len(ids), 50, generator=torch.Generator().manual_seed(0))   # the logits at each position
+        seen = []
+
+        class Model:
+            every_row = False                                                 # a forward that ignores the option
+
+            def forward(self, x, params):
+                seen.append(dict(params))
+                return (table if self.every_row else table[-params["last_tokens_only"]:]).unsqueeze(0)
+        body = {"input_ids": ids, "return_logprob": True, "logprob_start_len": start, "top_logprobs_num": top}
+        model = Model()
+        with mock.patch.object(s, "model", model, create=True), \
+                mock.patch.dict(s.G, gen=types.SimpleNamespace(jobs=[])):
+            meta = json.loads(asyncio.run(s.generate(FakeReq(body))).body)["meta_info"]
+            model.every_row = True
+            self.assertEqual(json.loads(asyncio.run(s.generate(FakeReq(body))).body)["meta_info"], meta)
+        self.assertEqual(seen[0]["last_tokens_only"], len(ids) - (start - 1))   # rows 3.. only reach the head
+        lp = torch.log_softmax(table, -1)
+        self.assertEqual(len(meta["input_token_logprobs"]), len(ids) - start)
+        for j, t in enumerate(range(start, len(ids))):                        # token t, predicted at row t - 1
+            got_lp, got_id, _ = meta["input_token_logprobs"][j]
+            self.assertEqual(got_id, ids[t])
+            self.assertAlmostEqual(got_lp, float(lp[t - 1, ids[t]]), places=5)
+            v, ix = lp[t - 1].topk(top)
+            self.assertEqual([e[1] for e in meta["input_top_logprobs"][j]], ix.tolist())
+            self.assertAlmostEqual(meta["input_top_logprobs"][j][0][0], float(v[0]), places=5)
+        self.assertEqual([e[1] for e in meta["output_top_logprobs"][0]], lp[-1].topk(top)[1].tolist())
 
 
 if __name__ == "__main__":

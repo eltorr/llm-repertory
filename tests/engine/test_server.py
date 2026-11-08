@@ -193,7 +193,7 @@ class WiringTests(EngineRoutes):
             self.assertEqual(paths.count(path), 1)
             self.assertIs(next(r for r in routes if r.path == path).endpoint, endpoint)    # the engine's own
         for path in ("/v1/completions", "/v1/models", "/memory", "/expert_cache/resize", "/expert_cache/ram",
-                     "/expert_cache/ram/stop"):
+                     "/expert_cache/ram/stop", "/prepare", "/generate"):
             self.assertIn(path, paths)
         self.assertEqual(self.e.EOS, [7])
         self.assertIs(self.e.parse_tool_calls, qwen_chat.parse_tool_calls)
@@ -210,6 +210,20 @@ class WiringTests(EngineRoutes):
         job = Job.made[-1]
         self.assertEqual((job.sampler, job.max_new_tokens), ({"temperature": 0.2, "top_p": 0.95, "top_k": 20,
                                                               "min_p": 0.0}, 50))
+
+    def test_prepare_gives_the_prompt_the_chat_routes_run(self):
+        # curation's replay (repertory/bench.py): the prompt as token ids, through the model's own template
+        for body, route in (({"messages": [{"role": "user", "content": "17 x 23?"}], "tools": TOOLS,
+                              "chat_template_kwargs": OFF}, self.chat),
+                            ({"input": "17 x 23?", "tools": RESPONSES_TOOLS}, self.responses)):
+            self.tok.prompts.clear()
+            status, r = post(self.e.app, "/prepare", body)
+            self.assertEqual((status, r["ids"]), (200, [0] * self.tok.length))
+            route(body)
+            self.assertEqual(len(self.tok.prompts), 2)
+            self.assertEqual(self.tok.prompts[0], self.tok.prompts[1])
+        self.assertTrue(self.tok.prompts[0].startswith("<|im_start|>user\ntools=True"))
+        self.assertTrue(self.tok.prompts[0].endswith("<think>\n"))           # thinking on: the Responses default
 
 
 class ChatStreamTests(EngineRoutes):
