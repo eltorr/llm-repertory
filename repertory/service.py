@@ -43,6 +43,8 @@ from engines.exl3_offload import sizing  # noqa: E402
 RAM_OVERHEAD = sizing.RAM_OVERHEAD
 RAM_GRACE_S = 90                 # after a start, page cache from loading takes a while to be handed back
 FREED_S = 300                    # how long a stopped server's RAM counts as reusable for the next start (WSL)
+RAM_BACK_OUT = 0.2               # a start after a stop waits while more than this share of the stopped server's RAM,
+RAM_BACK_OUT_GB = 4.0            # or more than this if that is more, is still on its way back to Windows
 RAM_GROW_MARGIN_GB = 1.0         # a RAM cache growing in the background stops below lean's threshold plus this
 SOFT_CAP_S = 3600                # how long a RAM cache that ran short caps the next full starts
 # How long the model's host may not answer (WSL down: out of disk or memory, or a crash) before a running model is
@@ -225,6 +227,24 @@ class Service:
             avail = max(avail, f[1] + f[2])
         return avail
 
+    async def ram_back(self, m, cancelled=None):
+        """Right after a stop, wait (up to host.ram_return_s) until Windows has most of the stopped server's RAM back.
+        WSL returns it over a minute or so, and a server started meanwhile loads on top of what Windows hasn't got
+        back yet: a switch from GLM-5.3-Flash to Qwen took the PC down to 4 GB free 15 s after the stop. Returns the
+        last sample."""
+        f = self.freed
+        if not f or not self.host.ram_return_s or not f[2]:
+            return m
+        want = f[1] + f[2] - max(RAM_BACK_OUT_GB * GB, RAM_BACK_OUT * f[2])
+        if m["ram_avail"] < want and time.time() - f[0] < self.host.ram_return_s:
+            self.event("start", f"waiting for WSL to hand the last model's RAM back to Windows "
+                                f"({(want - m['ram_avail']) / GB:.0f} GB to go, up to "
+                                f"{self.host.ram_return_s - (time.time() - f[0]):.0f} s)")
+        while m["ram_avail"] < want and time.time() - f[0] < self.host.ram_return_s and not (cancelled and cancelled()):
+            await asyncio.sleep(2)
+            m = await self.fresh_sample(time.time())
+        return m
+
     def soft_ram_cap(self):
         c = self.ram_soft_cap
         return c[1] if c and time.time() - c[0] < SOFT_CAP_S else None
@@ -393,14 +413,8 @@ class Service:
             return True
         if self.be.state in ("running", "starting", "error"):
             await self._stop_locked(f"switching to {tier}")
-        m = await self.fresh_sample(time.time())
+        m = await self.ram_back(await self.fresh_sample(time.time()))
         plan = self.plan_for(tier, m)
-        if tier == "full" and host.ram_settle_s:
-            # just after a stop, WSL is still handing RAM back (~15-30 s): wait for it before sizing the RAM tier
-            need = math.ceil(plan["ram_target"] / GIB)
-            while self.full_ram_gib(m, plan) < need and time.time() - self.last_stop_t < host.ram_settle_s:
-                await asyncio.sleep(2)
-                m = await self.fresh_sample(time.time())
         if not plan["ok"]:
             self.be.error = f"cannot start {tier}: {plan.get('reason')}"
             self.be.set("error")

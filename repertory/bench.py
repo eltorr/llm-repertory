@@ -925,7 +925,8 @@ class Bench:
         self.yielded, self.ram_low = None, None
         await asyncio.to_thread(svc.host.backend_stop)
         await asyncio.sleep(SETTLE_S)
-        m = await svc.fresh_sample(time.time())
+        # the last server's RAM back on Windows first: the manager's rule (Service.ram_back)
+        m = await svc.ram_back(await svc.fresh_sample(time.time()), lambda: self.cancelled)
         spare = None
         if r["ram"]:
             m, spare = await self.ram_to_spare(r, m)
@@ -1010,13 +1011,16 @@ class Bench:
             rec["interrupted"] = not self.cancelled
         elif rec.get("error") and svc.host.follower:
             rec["log_tail"] = svc.host.follower.tail(8)
+        up = await svc.fresh_sample(time.time())        # free RAM with the server still up
         await asyncio.to_thread(svc.host.backend_stop)
         await asyncio.to_thread(svc.host.after_stop)      # and its page cache, before the next run or the model
         if self.ram_low is not None:
             rec["ram_free_min_gb"] = round(self.ram_low / GB, 1)
-        # the next run, or the model afterwards, can reuse this server's RAM before WSL has handed it back
+        # the next run, or the model afterwards, can reuse this server's RAM before WSL has handed it back, and
+        # waits until Windows has most of it (Service.ram_back)
+        back = svc.ram_for_start(m)
         svc.last_stop_t = time.time()
-        svc.freed = (svc.last_stop_t, svc.ram_for_start(m), 0.0)
+        svc.freed = (svc.last_stop_t, up["ram_avail"], max(0.0, back - up["ram_avail"]))
         if not rec.get("error"):
             rec["previous"] = compare(rec, previous_record(rec, skip=self.dir))
         rec["finished"] = True

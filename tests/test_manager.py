@@ -204,6 +204,46 @@ class RamTuningTests(unittest.TestCase):
         s.freed = (time.time() - 400, 9e9, 45e9)                     # too long ago: the figure may be stale
         self.assertEqual(s.full_ram_gib({"ram_avail": 12e9}, p), short)
 
+    def run_ram_back(self, frees, freed, ram_return_s=90, start=1000.0):
+        """Service.ram_back on a clock that moves 2 s a sample: (free RAM it started on, seconds waited, events)."""
+        import asyncio
+        import types
+        from unittest import mock
+        from repertory import service
+        s = self.svc()
+        s.host.ram_return_s, s.freed, clock = ram_return_s, freed, [start]
+        frees = list(frees)
+
+        async def sleep(_):
+            clock[0] += 2
+
+        def nxt():
+            return frees.pop(0) if len(frees) > 1 else frees[0]
+
+        async def fresh(after):
+            return {"ram_avail": nxt()}
+        s.fresh_sample, s.ram_back = fresh, types.MethodType(service.Service.ram_back, s)
+        with mock.patch.object(service.time, "time", lambda: clock[0]), mock.patch.object(service.asyncio, "sleep",
+                                                                                           sleep):
+            m = asyncio.run(s.ram_back({"ram_avail": nxt()}))
+        return m["ram_avail"], clock[0] - start, s.events
+
+    def test_a_start_after_a_stop_waits_for_most_of_the_servers_ram_to_be_back(self):
+        # 9 GB free with a 45 GB server: wait until 45 GB is back, less a fifth of it still on its way
+        free, waited, events = self.run_ram_back([10e9, 20e9, 40e9, 45e9, 50e9], (1000.0, 9e9, 45e9))
+        self.assertEqual((free, waited), (45e9, 6))
+        self.assertIn("waiting for WSL to hand the last model's RAM back", events[0][1])
+
+    def test_it_waits_no_longer_than_the_host_allows(self):
+        free, waited, _ = self.run_ram_back([10e9], (1000.0, 9e9, 45e9))     # other apps took the rest meanwhile
+        self.assertEqual(waited, 90)
+        free, waited, events = self.run_ram_back([10e9], (1000.0, 9e9, 45e9), start=1100.0)   # long ago
+        self.assertEqual((waited, events), (0, []))
+
+    def test_no_wait_without_a_server_stopped_or_where_ram_comes_back_at_once(self):
+        for freed, ret in ((None, 90), ((1000.0, 9e9, 45e9), 0), ((1000.0, 9e9, 0.0), 90)):
+            self.assertEqual(self.run_ram_back([10e9], freed, ram_return_s=ret)[1:], (0, []), (freed, ret))
+
     def test_running_short_of_ram_caps_the_next_full_start(self):
         s = self.svc()
         p = self.plan()

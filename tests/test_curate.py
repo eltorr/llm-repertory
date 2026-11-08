@@ -506,6 +506,9 @@ class FakeService:
     def ram_for_start(self, m):
         return m["ram_avail"]
 
+    async def ram_back(self, m, cancelled=None):
+        return m
+
     async def _check(self):
         pass
 

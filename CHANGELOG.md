@@ -14,6 +14,11 @@ What changed in Repertory, newest first.
   are in place (only the ranges read, so a streamed n-gram table keeps its cached rows; `EXL3_LOAD_KEEP_CACHE=1`
   keeps them). This matters when switching models: WSL takes about half a minute to hand the last model's RAM back
   to Windows, and the next model's load used to add up to 10 GB of page cache in that time.
+- **A start right after a stop waits for the RAM to come back.** Under WSL2, Windows has a stopped model's RAM back
+  only after 60-80 s (up to 28 GB of it was neither free nor in the VM in between), and a Qwen start right after
+  GLM-5.3-Flash stopped took the PC down to 4 GB free. The manager and each benchmark run now start once Windows has
+  all but a fifth (or 4 GB) of it back, waiting up to 90 s; until now only a start whose RAM cache couldn't be sized
+  yet waited, for 30 s. Switching models takes up to a minute longer.
 
 ## 2026-11-08: Benchmark page and the head-to-head
 

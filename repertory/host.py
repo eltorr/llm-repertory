@@ -109,6 +109,7 @@ class Host:
     kind = "linux"
     label = "Linux"
     ram_settle_s = 0        # seconds after a stop before host RAM reflects it
+    ram_return_s = 0        # how long a start after a stop may wait for the stopped server's RAM (Service.ram_back)
     env = None
 
     def __init__(self, cfg):
@@ -310,6 +311,7 @@ class WindowsWSL(Host):
     kind = "windows-wsl"
     label = "Windows + WSL2"
     ram_settle_s = 30       # WSL hands freed memory back to Windows over ~15-30 s
+    ram_return_s = 90       # ... and Windows has it all only after 60-80 s
     env = dict(os.environ, WSL_UTF8="1")
 
     def __init__(self, cfg):

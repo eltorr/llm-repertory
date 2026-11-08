@@ -206,11 +206,13 @@ class FakeService:
         self.mon = types.SimpleNamespace(get=self.sample)
         self.started, self.stopped = [], []
         self.last_stop_t, self.ram_avail = 0.0, 50e9
+        self.server_ram, self.ram_back_at = 0.0, []          # RAM a run's server takes; when runs waited for RAM
 
     def sample(self):
         busy = self.game() if callable(self.game) else self.game
         used = 2e9 + (FakeEngine.arena + 6e9 if self.host.state == "running" else 0)
-        return {"t": time.time(), "vram_total": 32e9, "vram_used": used, "ram_avail": self.ram_avail,
+        ram = self.ram_avail - (self.server_ram if self.host.state == "running" else 0)
+        return {"t": time.time(), "vram_total": 32e9, "vram_used": used, "ram_avail": ram,
                 "perproc_ded": 1e9, "running": {"game.exe"} if busy else set(), "ext_util": 90.0 if busy else 0.0,
                 "ext_util_top": [["game.exe", 90]] if busy else []}
 
@@ -219,6 +221,10 @@ class FakeService:
 
     def ram_for_start(self, m):
         return m["ram_avail"]
+
+    async def ram_back(self, m, cancelled=None):
+        self.ram_back_at.append((self.host.state, len(self.host.envs)))
+        return m
 
     async def _check(self):
         pass
@@ -481,6 +487,13 @@ class BenchTests(unittest.TestCase):
         r = self.run_bench(["3.05:card:65536:ram=20"]).records[0]
         self.assertIsNone(r.get("error"), r.get("error"))
         self.assertEqual(self.svc.host.envs[0]["RAM_GB"], "20")
+
+    def test_each_run_waits_for_the_last_servers_ram_and_records_what_its_own_held(self):
+        self.svc.server_ram = 20e9
+        self.run_bench(["current", "current"])
+        self.assertEqual(self.svc.ram_back_at, [("stopped", 0), ("stopped", 1)])     # before each start
+        t, free, held = self.svc.freed
+        self.assertEqual((free, held), (30e9, 20e9))       # free with the server up, and what it took
 
     def test_page_cache_is_dropped_once_a_server_is_up_and_after_it_stops(self):
         r = self.run_bench(["current"]).records[0]

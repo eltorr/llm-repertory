@@ -101,6 +101,9 @@ again syncs the WSL clone; only committed code is synced.
     card, 34 and 40 GiB ran at the same speed, and the last 6 GiB only cost the PC RAM.
   - A restart reuses the RAM the stopped model held. Under WSL2, Windows only sees freed memory again after a few
     minutes, and sizing from its figure gave restarts a third of the cache.
+  - Under WSL2, a start right after a stop waits until Windows has most of the stopped model's RAM back (all but a
+    fifth, or 4 GB), for up to 90 s. Windows gets it back over 60-80 s, and a model loading meanwhile took the PC
+    down to 4 GB free. A switch takes up to a minute longer for it.
   - If full runs short of RAM and drops to lean, the next full starts get a smaller RAM cache for an hour, so
     full -> lean -> full doesn't repeat.
   - A full model whose RAM cache was sized while RAM was short grows it, with a restart, once 8 GiB more fits.
@@ -172,8 +175,9 @@ repertory bench --list | --table FOLDER | --sizing FOLDER
 - **RAM:** as the manager does, a run drops the page cache in WSL once its server is up and after it stops (loading
   leaves gigabytes there that Windows counts as used). A run with a set RAM cache (`:ram=GIB`) starts only if the PC
   can spare it, as the manager would size it; just after a stop it first waits for WSL to hand the last server's
-  memory back. Otherwise it is skipped with the RAM it would have had. Each run records the least free RAM while its
-  server was up (`ram_free_min_gb`).
+  memory back. Otherwise it is skipped with the RAM it would have had. Each run starts, as the manager's model does,
+  once Windows has most of the last server's RAM back. Each run records the least free RAM while its server was up
+  (`ram_free_min_gb`).
 - **Resuming:** a benchmark cut short (cancelled, the manager restarted, the PC rebooted) continues with
   `repertory bench --resume` or the tab's **Resume** button. The runs left go into the same folder, with the same
   workload.
