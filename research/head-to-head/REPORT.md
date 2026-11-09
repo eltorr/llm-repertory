@@ -24,6 +24,7 @@ PC runs at a usable speed, worth it for coding sessions?
 | puzzle | A logic puzzle | the unique solution (checked by brute force) |
 | ticket | A support ticket, solved with five simulated tools | 5 checks of the calls made and the reply |
 | log | A day's incident log: the service with the most downtime | the service and its minutes (replayed) |
+| shop | A coding session: fix three bugs in a small project and write a feature from its spec, through tools (list, read, write and edit files, run the tests); 30 minutes | 23 hidden tests |
 
 Every request is streamed with thinking on at reasoning effort `high` (what Hermes sends), the model's own sampling
 values and no `max_tokens`. A task still running after 20 minutes is cut off and fails. Code runs in its own Python

@@ -2,6 +2,19 @@
 
 What changed in Repertory, newest first.
 
+## 2026-11-08: Head-to-head: a coding session, and an app build to grade
+
+- **A coding-session task** ([shop.py](research/head-to-head/shop.py)): a small project (a shop's pricing code,
+  its spec and its tests) that the model works on through tools, turn after turn: list, read, write and edit files,
+  run the tests. Three bugs to fix and a feature to write from the spec, graded on 23 hidden tests; 30 minutes.
+  Each turn's prompt size and time to first token are recorded, so the cost of reading a growing context shows.
+  Model-written code is checked and run as the code tasks' is (isolated, the project's own modules allowed).
+- **`run.py --effort`** sets the reasoning effort sent (default `high`, what Hermes sends); results record it, and
+  the benchmark page's head-to-head table has an Effort column and the new task.
+- **An app build to grade** ([app/](research/head-to-head/app/)): a prompt for a coding agent (a command-line
+  expense tracker, exactly specified) and `acceptance.py`, which grades the build with 20 tests of the app as a
+  user runs it. Checked against a reference build (20/20).
+
 ## 2026-11-08: Curation: a run that didn't happen isn't a failure
 
 - **A skipped or cut-short regression run is not run, not failed.** GLM-5.3-Flash 2.05's reference was recorded

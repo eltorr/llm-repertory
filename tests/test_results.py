@@ -105,7 +105,7 @@ class ResultsTests(unittest.TestCase):
         self.assertLess(rtx4090, rtx5090)
         section = page[rtx5090:]
         self.assertLess(section.index("| 32 GB card |"), section.index("| 16 GB card (capped) |"))
-        self.assertIn("| GLM-5.3-Flash | 2.05 bpw | 32 GB card | 1/3 | pass (3.7 min) | fail (3.4 min) | - | "
+        self.assertIn("| GLM-5.3-Flash | 2.05 bpw | 32 GB card | high | 1/3 | pass (3.7 min) | fail (3.4 min) | - | "
                       "cut off (20 min) |", page)
         self.assertIn("4,802 tok/s (98K)", page)
 

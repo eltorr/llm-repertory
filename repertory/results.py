@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 LOG = ROOT / "results"
 PAGE = ROOT / "docs" / "benchmarks.md"
 SPEED, QUALITY = "speed.jsonl", "quality.jsonl"
-H2H_TASKS = ("calc", "sched", "cache", "paths", "puzzle", "ticket", "log")     # research/head-to-head/tasks.py
+H2H_TASKS = ("calc", "sched", "cache", "paths", "puzzle", "ticket", "log", "shop")   # research/head-to-head/tasks.py
 WORKLOADS = {"standard": 0, "quick": 1, "reference": 2}                         # the page's order: the benchmark first
 
 
@@ -86,13 +86,16 @@ def quality_row(res):
     name, bpw = model_facts(setup["quant"])
     tasks = [{"id": t["id"], "ok": bool(t.get("ok")), "tokens": t.get("completion_tokens"),
               "minutes": round(t["seconds"] / 60, 1) if t.get("seconds") else None,
-              "cut_off": bool(t.get("timed_out"))} for t in res["tasks"]]
+              "cut_off": bool(t.get("timed_out")),
+              **({"limit_min": t["limit_s"] // 60} if t.get("limit_s") and t["limit_s"] != res.get("limit_s") else {})}
+             for t in res["tasks"]]
     return {"id": f"{res.get('date')} {res['label']} {setup.get('gpu')}", "date": res.get("date"),
             "suite": "head-to-head", "gpu": gpu_name(setup.get("gpu")), "card_gb": setup.get("card_gb"),
             "card": bench.card_class(setup["vram_budget_gb"]), "capped": False, "ram_gb": setup.get("ram_gb"),
             "ram_preset": ram_preset(setup.get("ram_gb")), "platform": setup.get("platform"), "model": name,
             "quant": setup["quant"], "bpw": bpw, "context": setup.get("context"),
             "ram_cache_gib": setup.get("ram_cache_gib"), "limit_min": (res.get("limit_s") or 0) // 60,
+            "effort": res.get("effort") or "high",
             "passed": sum(t["ok"] for t in tasks), "total": len(tasks), "tasks": tasks}
 
 
@@ -176,8 +179,8 @@ def card_size(r):
 
 
 def quality_table(rows):
-    head = "| Model | Quant | Preset | Passed | " + " | ".join(H2H_TASKS) + " | Run on |"
-    out = [head, "|---" * (len(H2H_TASKS) + 5) + "|"]
+    head = "| Model | Quant | Preset | Effort | Passed | " + " | ".join(H2H_TASKS) + " | Run on |"
+    out = [head, "|---" * (len(H2H_TASKS) + 6) + "|"]
     for r in sorted(rows, key=lambda r: (-r["passed"], r["model"], r["quant"], r["date"] or "")):
         by = {t["id"]: t for t in r["tasks"]}
         cells = []
@@ -186,10 +189,11 @@ def quality_table(rows):
             if not t:
                 cells.append("-")
             elif t["cut_off"]:
-                cells.append(f"cut off ({r['limit_min']} min)")
+                cells.append(f"cut off ({t.get('limit_min') or r['limit_min']} min)")
             else:
                 cells.append(f"{'pass' if t['ok'] else 'fail'} ({_num(t['minutes'], '{:.1f}')} min)")
-        out.append(f"| {r['model']} | {r['bpw'] or r['quant']} bpw | {preset(r)} | {r['passed']}/{r['total']} | "
+        out.append(f"| {r['model']} | {r['bpw'] or r['quant']} bpw | {preset(r)} | {r.get('effort', 'high')} | "
+                   f"{r['passed']}/{r['total']} | "
                    + " | ".join(cells) + f" | {machine(r)}, {r['date']} |")
     return "\n".join(out)
 

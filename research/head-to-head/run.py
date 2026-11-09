@@ -1,12 +1,13 @@
 """Run the head-to-head (tasks.py) against the model the Repertory service serves now, and grade every answer.
 
-    python research/head-to-head/run.py LABEL [--only calc,sched] [--url http://127.0.0.1:30000]
+    python research/head-to-head/run.py LABEL [--only calc,sched] [--effort high] [--url http://127.0.0.1:30000]
 
 - Each task is one request; the tool task is a conversation that goes on while the model calls tools (the tools run
-  against tasks.Desk, a simulated support backend).
-- Every request: streamed, thinking on at reasoning effort "high" (what Hermes sends), the model's own sampling
-  defaults (no temperature or top_p in the request), and no max_tokens. A task still running after LIMIT_S is cut
-  off and fails.
+  against tasks.Desk, a simulated support backend), and so is the coding session (shop.py: a small project the model
+  reads, edits and tests through tools, graded on hidden tests).
+- Every request: streamed, thinking on at reasoning effort "high" (what Hermes sends; --effort sets another), the
+  model's own sampling defaults (no temperature or top_p in the request), and no max_tokens. A task still running
+  after LIMIT_S (the coding session: its limit_s) is cut off and fails.
 - Code answers: the last ```python block, checked first (only the standard-library modules in SAFE_IMPORTS; no file,
   process or eval-style calls; no dunder tricks), then run with the task's tests in its own Python process
   (isolated mode, an empty folder, a timeout).
@@ -27,6 +28,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import shop  # noqa: E402
 import tasks  # noqa: E402
 
 LIMIT_S = 20 * 60
@@ -37,7 +39,8 @@ UNSAFE_CALLS = {"open", "eval", "exec", "compile", "__import__", "input", "break
                 "memoryview", "help", "exit", "quit"}
 SAFE_DUNDERS = {"__init__", "__call__", "__repr__", "__str__", "__eq__", "__ne__", "__lt__", "__le__", "__gt__",
                 "__ge__", "__hash__", "__len__", "__iter__", "__next__", "__contains__", "__getitem__",
-                "__setitem__", "__delitem__", "__post_init__", "__slots__", "__name__", "__bool__"}
+                "__setitem__", "__delitem__", "__post_init__", "__slots__", "__name__", "__bool__", "__add__",
+                "__sub__", "__mul__", "__neg__", "__abs__", "__radd__", "__rsub__", "__rmul__"}
 BLOCK = re.compile(r"```(?:python|py)?\s*\n(.*?)```", re.S)
 
 
@@ -81,16 +84,16 @@ def stream_chat(url, body, deadline):
     return out
 
 
-def body_for(messages, tools=None):
+def body_for(messages, tools=None, effort="high"):
     b = {"model": "repertory", "messages": messages, "stream": True, "stream_options": {"include_usage": True},
-         "reasoning_effort": "high", "chat_template_kwargs": {"enable_thinking": True}}
+         "reasoning_effort": effort, "chat_template_kwargs": {"enable_thinking": True}}
     if tools:
         b["tools"] = tools
     return b
 
 
 # ------------------------------------------------------------------------------------------------- code checks
-def unsafe(code):
+def unsafe(code, imports=SAFE_IMPORTS):
     """Why the code may not run, or None."""
     try:
         tree = ast.parse(code)
@@ -99,7 +102,7 @@ def unsafe(code):
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             names = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module or ""]
-            bad = [n for n in names if n.split(".")[0] not in SAFE_IMPORTS]
+            bad = [n for n in names if n.split(".")[0] not in imports]
             if bad:
                 return f"imports {', '.join(bad)}"
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in UNSAFE_CALLS:
@@ -153,13 +156,14 @@ def manager_setup(url):
 
 
 # ------------------------------------------------------------------------------------------------------- tasks
-def run_task(url, task):
-    deadline = time.monotonic() + LIMIT_S
+def run_task(url, task, effort="high"):
+    limit = task.get("limit_s", LIMIT_S)
+    deadline = time.monotonic() + limit
     rec = {"id": task["id"], "name": task["name"], "requests": 0, "completion_tokens": 0, "prompt_tokens": 0,
-           "seconds": 0.0, "timed_out": False}
+           "seconds": 0.0, "timed_out": False, "limit_s": limit}
 
     def ask(messages, tools=None):
-        r = stream_chat(url, body_for(messages, tools), deadline)
+        r = stream_chat(url, body_for(messages, tools, effort), deadline)
         rec["requests"] += 1
         rec["seconds"] = round(rec["seconds"] + r["total_s"], 2)
         u = r["usage"] or {}
@@ -167,7 +171,39 @@ def run_task(url, task):
         rec["prompt_tokens"] += u.get("prompt_tokens") or 0
         rec["timed_out"] = rec["timed_out"] or r["timed_out"]
         rec.setdefault("ttft_s", r["ttft_s"])
+        rec.setdefault("turns", []).append({"prompt_tokens": u.get("prompt_tokens"),
+                                            "completion_tokens": u.get("completion_tokens"),
+                                            "ttft_s": r["ttft_s"], "seconds": r["total_s"]})
         return r
+
+    if task["kind"] == "session":
+        ws, final = shop.Workspace(unsafe, SAFE_IMPORTS), None
+        messages, rec["transcript"] = [{"role": "user", "content": task["prompt"]}], []
+        for _ in range(task.get("max_requests", 60)):
+            r = ask(messages, task["tools"])
+            rec["transcript"].append({"content": r["content"], "reasoning_chars": len(r["reasoning"]),
+                                      "tool_calls": r["tool_calls"]})
+            if r["timed_out"]:
+                break
+            if not r["tool_calls"]:
+                final = r["content"]
+                break
+            calls = [{"id": c["id"] or f"call_{i}", "type": "function",
+                      "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}}
+                     for i, c in enumerate(r["tool_calls"])]
+            messages.append({"role": "assistant", "content": r["content"] or "", "tool_calls": calls})
+            for c in calls:
+                out = shop.tool_result(ws, c["function"]["name"], c["function"]["arguments"])
+                messages.append({"role": "tool", "tool_call_id": c["id"], "content": out})
+        ok, passed, total, detail = ws.grade()
+        if rec["timed_out"]:
+            detail = f"cut off after {limit // 60} min ({passed}/{total} of the hidden tests pass)"
+        elif final is None:
+            detail = f"still calling tools after {rec['requests']} requests ({passed}/{total} pass)"
+        rec.update(ok=ok and final is not None and not rec["timed_out"], score=f"{passed}/{total}", detail=detail,
+                   answer=final, tool_calls=len(ws.calls), test_runs=ws.test_runs, changed=sorted(ws.written),
+                   files={p: ws.files[p] for p in sorted(ws.written)})
+        return rec
 
     if task["kind"] == "tools":
         desk, messages, final = tasks.Desk(), [{"role": "user", "content": task["prompt"]}], None
@@ -200,7 +236,7 @@ def run_task(url, task):
     r = ask([{"role": "user", "content": task["prompt"]}])
     rec.update(answer=r["content"], reasoning=r["reasoning"], finish=r["finish"])
     if r["timed_out"]:
-        rec.update(ok=False, score="-", detail=f"cut off after {LIMIT_S // 60} min")
+        rec.update(ok=False, score="-", detail=f"cut off after {limit // 60} min")
     elif task["kind"] == "code":
         ok, passed, total, detail = grade_code(task, r["content"])
         rec.update(ok=ok, score=f"{passed}/{total}", detail=detail)
@@ -214,6 +250,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("label", help="the results' name, e.g. qwen-4.05")
     p.add_argument("--only", help="task ids, comma-separated")
+    p.add_argument("--effort", default="high", help="the reasoning_effort sent (default high, what Hermes sends)")
     p.add_argument("--url", default="http://127.0.0.1:30000")
     a = p.parse_args(argv)
     if not re.fullmatch(r"[\w.-]+", a.label):
@@ -221,13 +258,14 @@ def main(argv=None):
     chosen = [t for t in tasks.TASKS if not a.only or t["id"] in a.only.split(",")]
     models = json.load(urllib.request.urlopen(a.url + "/v1/models", timeout=30))["data"]
     out = {"label": a.label, "model": models[0]["id"] if models else None,
-           "date": time.strftime("%Y-%m-%d %H:%M"), "limit_s": LIMIT_S, "setup": manager_setup(a.url), "tasks": []}
+           "date": time.strftime("%Y-%m-%d %H:%M"), "limit_s": LIMIT_S, "effort": a.effort,
+           "setup": manager_setup(a.url), "tasks": []}
     path = HERE / "results" / f"{a.label}.json"
     path.parent.mkdir(exist_ok=True)
     for t in chosen:
         print(f"== {t['id']}: {t['name']}", flush=True)
         try:
-            rec = run_task(a.url, t)
+            rec = run_task(a.url, t, a.effort)
         except Exception as e:  # noqa: BLE001 - one failed task must not end the run
             rec = {"id": t["id"], "name": t["name"], "ok": False, "score": "-", "detail": f"request failed: {e}"}
         out["tasks"].append(rec)

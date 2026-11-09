@@ -7,6 +7,7 @@ its solution is unique, the log's downtime by replaying it), so the expected ans
 import itertools
 import random
 import re
+import shop
 
 ANSWER = re.compile(r"ANSWER:\s*(.+)", re.I)
 
@@ -487,6 +488,8 @@ TASKS = [
     {"id": "puzzle", "kind": "answer", "name": "Logic puzzle", "prompt": PUZZLE_PROMPT},
     {"id": "ticket", "kind": "tools", "name": "Support ticket with tools", "prompt": TICKET_PROMPT, "tools": TOOLS},
     {"id": "log", "kind": "answer", "name": "Incident log (long context)", "prompt": LOG_PROMPT},
+    {"id": "shop", "kind": "session", "name": "Coding session: fix and extend a project", "prompt": shop.PROMPT,
+     "tools": shop.TOOLS, "limit_s": 30 * 60},
 ]
 
 if __name__ == "__main__":
