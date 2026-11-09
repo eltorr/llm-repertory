@@ -2,6 +2,21 @@
 
 What changed in Repertory, newest first.
 
+## 2026-11-08: /v1/models lists the installed models, and a request picks one
+
+- **`/v1/models`** lists the catalog models installed on this PC that the dashboard offers, in OpenAI's form (`id`,
+  `object`, `created`: the day the entry was curated, `owned_by`, and `max_model_len`), the loaded one first. Until
+  now it listed the loaded model alone, as its family, with `created: 0`. **`GET /v1/models/{id}`** returns one,
+  or 404 `model_not_found`.
+- **Models answer under their catalog id** (`qwen3.8-flash-next-exl3-4.05`), the `model` of every answer, so it
+  matches the list. Requests may still name the family (`qwen3.8-flash-next`: the loaded model if it is of that
+  family, else its largest installed quant) or the quant.
+- **A request for another installed model switches to it**: requests already running finish first (up to 10
+  minutes, then a 503), requests arriving meanwhile wait for the switch, and the dashboard shows the new model.
+  A catalog model the PC doesn't have, or one that hasn't passed curation, gets a 404; any other name (`repertory`,
+  an old one) is still answered by the loaded model. The "Switch to the model a request names" setting
+  (`switch_on_request`, on by default) turns switching off.
+
 ## 2026-11-08: Head-to-head: a coding session, and an app build to grade
 
 - **A coding-session task** ([shop.py](research/head-to-head/shop.py)): a small project (a shop's pricing code,

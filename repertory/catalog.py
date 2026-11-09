@@ -283,8 +283,9 @@ def offered(model, show_all=False):
 
 
 def served_name(model):
-    """The name clients use for the model (/v1/models): its family."""
-    return model["family"]
+    """The name clients use for the model (/v1/models, and the `model` its answers carry): its catalog id. Requests
+    may also name it by its quant or family (Service.resolve_model)."""
+    return model["id"]
 
 
 def setup_id(model):

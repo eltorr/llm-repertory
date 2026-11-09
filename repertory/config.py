@@ -72,6 +72,7 @@ DEFAULTS = {
     "remote_host": "",                  # this PC's name for other devices, used in that link ("" = computer name)
     "auto_switch": True,
     "wake_on_request": True,
+    "switch_on_request": True,          # a request naming another installed model (/v1/models) switches to it
     "preload_on_launch": False,
     "preload_when_free": False,
     "upgrade_when_idle": True,

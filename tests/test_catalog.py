@@ -131,7 +131,7 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(m["source"]["revision"], "55a732e0c4c3d4614bc42b68493bb930d9b02c0a")
         self.assertEqual(catalog.setup_id(m), "m405")
         self.assertEqual(catalog.store_name(m), "qwen405")
-        self.assertEqual(catalog.served_name(m), "qwen3.8-flash-next")
+        self.assertEqual(catalog.served_name(m), "qwen3.8-flash-next-exl3-4.05")      # what clients name it
         self.assertIsNone(self.cat.find("5.0"))
         with self.assertRaises(KeyError):
             self.cat.model("5.0")
@@ -146,7 +146,7 @@ class LookupTests(unittest.TestCase):
                                        "revision": "332ab457b709b7ba30dd9a448be5de03b80a7ac9", "verify": "hub-hashes"})
         self.assertEqual(m["paths"], {"model_dir": "model-glm-3.05", "store": "store/glm305.bin"})
         self.assertEqual((catalog.setup_id(m), catalog.store_name(m), catalog.served_name(m)),
-                         ("mglm305", "glm305", "glm-5.3-flash"))
+                         ("mglm305", "glm305", "glm-5.3-flash-exl3-3.05"))
         self.assertIn("Glm5NextForConditionalGeneration", self.cat.engine_of(m)["supports"]["architectures"])
         # offered once curated, not before
         self.assertFalse(m["offer_untested"])

@@ -6,7 +6,7 @@ model, sampling, tools and reasoning behave the same. Tested with the official `
 ```
 Base URL:  http://127.0.0.1:30000/v1
 API key:   not checked (send any non-empty string if your client insists)
-Model:     qwen3.8-flash-next   (any name works)
+Model:     an id from /v1/models, such as qwen3.8-flash-next-exl3-4.05
 ```
 
 | Method | Path | Notes |
@@ -14,10 +14,32 @@ Model:     qwen3.8-flash-next   (any name works)
 | POST | `/v1/responses` | The main API: streaming, function tools, reasoning control. See [Responses API](#responses-api) |
 | POST | `/v1/chat/completions` | Supported for compatibility, with the same features. See [Chat Completions](#chat-completions) |
 | POST | `/v1/completions` | Legacy raw-prompt completion |
-| GET | `/v1/models` | Answered without loading the model |
+| GET | `/v1/models` | The installed models. Answered without loading one |
+| GET | `/v1/models/{id}` | One of them, or 404 `model_not_found` |
 
 Not available: embeddings, images, audio, files, batches, assistants and Anthropic's `/v1/messages`. These return
 404.
+
+## Models
+
+`/v1/models` lists the catalog models installed on this PC that the dashboard offers, in OpenAI's form (`id`,
+`object`, `created`, `owned_by`, and `max_model_len`, the context it runs with). The loaded model comes first. Its
+`id` is the catalog's, and it is the `model` its answers carry.
+
+A request's `model` picks the model:
+
+- An `id` from the list, or a quant (`4.05`, `glm-2.05`): that model.
+- A family (`qwen3.8-flash-next`, `glm-5.3-flash`): the loaded model if it is of that family, else the family's
+  largest installed quant.
+- A catalog model this PC doesn't have, or one that hasn't passed curation: 404 `model_not_found`.
+- Any other name (`repertory`, an old one): the loaded model, as before.
+
+A request for an installed model that isn't loaded switches to it: requests already running finish first (for up to
+10 minutes; past that the request gets a 503), the switch takes 1.5-2 minutes on a 32 GB card while the request
+waits, and requests arriving meanwhile wait for it. The dashboard shows the model it switched to, and it stays
+loaded. Two clients asking for different models make it switch back and forth: give them the same one. The
+"Switch to the model a request names" setting (`switch_on_request`) turns this off; the loaded model then answers
+whatever a request names.
 
 ## Responses API
 

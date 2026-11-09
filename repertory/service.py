@@ -13,6 +13,7 @@ the manager adopts the running model instead of restarting it. Crashes are recov
 running out of VRAM or RAM lowers that budget for next time ("learned limits").
 """
 import asyncio
+import calendar
 import collections
 import hmac
 import http.client
@@ -50,6 +51,7 @@ SOFT_CAP_S = 3600                # how long a RAM cache that ran short caps the 
 # How long the model's host may not answer (WSL down: out of disk or memory, or a crash) before a running model is
 # taken as lost; checks run every 10 s, and a busy WSL can miss one
 UNREACHABLE_S = 60
+SWITCH_DRAIN_S = 600             # a request for another model waits this long for the running requests to finish
 UI_FILE = REPO / "repertory" / "ui" / "index.html"
 SIGNIN_FILE = REPO / "repertory" / "ui" / "signin.html"   # the root without the private link
 PAGES = ("/", "/_switcher", "/_switcher/", "/_switcher/index.html")
@@ -61,6 +63,11 @@ OOM_VRAM = re.compile(r"out of memory|OutOfMemoryError|GUARD vram\b|Insufficient
 OOM_RAM = re.compile(r"GUARD ram\b|MemoryError|Killed\b|oom-kill", re.I)
 # the dashboard's cookie, and QwenFlash's (this project's earlier name): devices signed in before keep working
 COOKIE, LEGACY_COOKIE = "repertory_token", "qf_token"
+
+
+def model_not_found(msg):
+    """OpenAI's error for a model it doesn't have."""
+    return {"error": {"message": msg, "type": "invalid_request_error", "param": "model", "code": "model_not_found"}}
 
 
 class Backend:
@@ -115,6 +122,8 @@ class Service:
         self.tlock = None
         self.task = None
         self.in_flight = self.held = self.served = self.failed = 0
+        self.switching = None            # the quant a request is switching the model to (one switch at a time)
+        self.routing = 0                 # requests choosing their model: not yet sent to the model server
         self.last_request = self.last_done = None
         self.override_until = 0.0
         self.paused_reason = None
@@ -858,6 +867,51 @@ class Service:
                                f"{(m['ram_avail'] / GB) if m else 0:.1f} GB RAM free); model not started")
             await asyncio.sleep(2)
 
+    async def route(self, body):
+        """Before a request goes to the model server: the model it names (resolve_model), switched to if it isn't the
+        configured one (switch_on_request). One switch at a time; requests arriving meanwhile wait for it, then
+        choose. The switch waits (up to SWITCH_DRAIN_S) for requests already sent to the model to finish. Returns
+        (ok, error, HTTP status, switched)."""
+        try:
+            name = json.loads(body).get("model") if body else None
+        except (ValueError, AttributeError, UnicodeDecodeError):
+            name = None                                  # the model server answers what it makes of it
+        self.routing += 1
+        try:
+            while self.switching:
+                await asyncio.sleep(0.5)
+            want, err = self.resolve_model(name)
+            if err:
+                return False, err, 404, False
+            if want is None or want["quant"] == self.cfg["quant"] or not self.cfg["switch_on_request"]:
+                return True, "", 200, False
+            if self.bench.running:
+                return (False, "a benchmark is running (Repertory dashboard, Benchmark tab); try again when it "
+                               "finishes", 503, False)
+            if self.observe or self.setup.blocking:
+                return False, ("this manager is in observe mode and does not switch models" if self.observe else
+                               f"setup step '{self.setup.running}' is running; try again when it finishes"), 503, False
+            self.switching = want["quant"]
+            try:
+                before = self.model()
+                deadline = time.time() + SWITCH_DRAIN_S
+                while self.in_flight - self.routing > 0:       # requests the model server is answering
+                    if time.time() > deadline:
+                        return False, (f"{before['label']} is still answering other requests; ask for "
+                                       f"{want['id']} again later"), 503, False
+                    await asyncio.sleep(0.5)
+                self.event("switch", f"a request asked for {want['label']}: switching from {before['label']}")
+                self.cfg["quant"] = want["quant"]
+                config.save_config(self.cfg)
+                if self.be.state in ("running", "starting", "resizing"):
+                    # start stops a server of another model first, and is a no-op if this one is already up
+                    await self.start(self.be.tier or "full", f"a request asked for {want['label']}")
+                return True, "", 200, True                    # stopped or paused: ensure_ready starts it, as ever
+            finally:
+                self.switching = None
+        finally:
+            self.routing -= 1
+
     async def forward(self, method, target, headers, body, writer):
         cfg = self.cfg
         self.in_flight += 1
@@ -870,13 +924,17 @@ class Service:
         bw = None
         stats = StreamStats()
         try:
-            ok, msg = await self.ensure_ready()
+            ok, msg, code, switched = await self.route(body)
+            was_held = was_held or switched
+            if ok:
+                ok, msg = await self.ensure_ready()
             if held:
                 self.held -= 1
                 held = False
             if not ok:
                 self.failed += 1
-                await respond(writer, 503, oai_error(msg))
+                await respond(writer, code if code != 200 else 503, model_not_found(msg) if code == 404 else
+                              oai_error(msg))
                 return
             try:
                 br, bw = await asyncio.open_connection("127.0.0.1", cfg["backend_port"])
@@ -933,10 +991,50 @@ class Service:
                 "tokens_in": sum(r["prompt"] for r in self.metrics)}
 
     # ================================================================ the network port
+    def client_models(self):
+        """The catalog models clients can name (/v1/models): the configured one first (what answers now), then the
+        others installed here (the setup check) that the dashboard offers."""
+        eng = (self.setup.hw or {}).get("engine") or {}
+        current = self.model()
+        return [current] + [m for m in catalog.load().models_for(sizing.ENGINE)
+                            if m["id"] != current["id"] and eng.get(catalog.setup_id(m)) == "1"
+                            and catalog.offered(m, self.cfg["offer_uncurated"])]
+
+    def model_object(self, m):
+        """A model as OpenAI's API lists it; created: the day its catalog entry was curated (0 before)."""
+        day = (m.get("curation") or {}).get("date")
+        try:
+            created = calendar.timegm(time.strptime(day, "%Y-%m-%d")) if day else 0
+        except ValueError:
+            created = 0
+        return {"id": catalog.served_name(m), "object": "model", "created": created, "owned_by": "repertory",
+                "max_model_len": min(self.cfg["context"], (m.get("facts") or {}).get("max_context") or 262144)}
+
     def models_list(self):
-        # the catalog's name for the model, as the model server's own /v1/models lists it (server.served_name)
-        return {"object": "list", "data": [{"id": catalog.served_name(self.model()), "object": "model", "created": 0,
-                                            "owned_by": "repertory", "max_model_len": self.cfg["context"]}]}
+        return {"object": "list", "data": [self.model_object(m) for m in self.client_models()]}
+
+    def resolve_model(self, name):
+        """(model, error) for the `model` a request names. A model clients can name, by its id or quant; a family
+        (qwen3.8-flash-next): the configured model if it is of that family, else the family's largest quant there
+        is. A catalog model this PC can't serve is an error. Any other name (an old one, "repertory"): (None, None),
+        and the configured model answers."""
+        if not isinstance(name, str) or not name.strip():
+            return None, None
+        name, cat, ours = name.strip(), catalog.load(), self.client_models()
+        m = cat.find(name)
+        if m is not None:
+            if any(o["id"] == m["id"] for o in ours):
+                return m, None
+            eng = (self.setup.hw or {}).get("engine") or {}
+            if eng.get(catalog.setup_id(m)) == "1":
+                return None, f"the model {name!r} hasn't passed curation on this PC, so it isn't offered"
+            return None, f"the model {name!r} isn't installed on this PC (Repertory dashboard, Setup tab)"
+        family = [o for o in ours if o["family"] == name]
+        if family:
+            return (ours[0] if ours[0]["family"] == name else max(family, key=lambda o: o["bpw"])), None
+        if any(c["family"] == name for c in cat.models):
+            return None, f"no {name} model is installed on this PC (Repertory dashboard, Setup tab)"
+        return None, None
 
     async def bind_front(self):
         """Listen on the network port (127.0.0.1:network_port), which `tailscale serve` or similar exposes."""
@@ -1020,6 +1118,13 @@ class Service:
                     await respond(writer, 401, {"error": "the dashboard needs its private link"})
             elif p == "/v1/models" and method in ("GET", "HEAD"):
                 await respond(writer, 200, self.models_list())
+            elif p.startswith("/v1/models/") and method in ("GET", "HEAD"):
+                name = urllib.parse.unquote(p[len("/v1/models/"):])
+                m, err = self.resolve_model(name)
+                if m is not None:
+                    await respond(writer, 200, self.model_object(m))
+                else:
+                    await respond(writer, 404, model_not_found(err or f"The model {name!r} does not exist"))
             elif p in COMPLETIONS:
                 if method != "POST":
                     # a GET (an image tag on any web page) must not wake the model

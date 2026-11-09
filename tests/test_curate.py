@@ -769,7 +769,7 @@ class RegressionTests(unittest.TestCase):
         for p in seen:
             self.assertNotIn("max_tokens", p)
             self.assertEqual(p["temperature"], 0)
-            self.assertEqual(p["model"], "qwen3.8-flash-next")
+            self.assertEqual(p["model"], "qwen3.8-flash-next-exl3-4.05")
         self.assertEqual([p["chat_template_kwargs"]["enable_thinking"] for p in cases],
                          [False, False, False, False, True])
         # the prompts as token ids: the very requests the chat route ran (not the document's), and greedy answers

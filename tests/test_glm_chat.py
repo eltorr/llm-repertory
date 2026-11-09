@@ -174,8 +174,9 @@ class ServerChoiceTests(unittest.TestCase):
                 server.chat_format(bad)
 
     def test_the_served_name_is_the_catalogs_for_the_folder(self):
-        self.assertEqual(server.served_name(server.ROOT / "model-glm-3.05"), "glm-5.3-flash")
-        self.assertEqual(server.served_name(server.ROOT / "store" / ".." / "model-4.05"), "qwen3.8-flash-next")
+        self.assertEqual(server.served_name(server.ROOT / "model-glm-3.05"), "glm-5.3-flash-exl3-3.05")
+        self.assertEqual(server.served_name(server.ROOT / "store" / ".." / "model-4.05"),
+                         "qwen3.8-flash-next-exl3-4.05")
         self.assertEqual(server.served_name(server.ROOT / "my-model"), "my-model")      # not in the catalog
         self.assertIsNone(server.parse_args(["--model", "m", "--store", "s", "--ram-gb", "4"]).served_name)
 

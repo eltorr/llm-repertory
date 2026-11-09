@@ -18,7 +18,8 @@ offered once it has passed curation: a compatibility check and a regression chec
 
 **A model** (`models`):
 - `id`, such as `qwen3.8-flash-next-exl3-4.05` or `glm-5.3-flash-exl3-3.05`, and `label`.
-- `family`: the name clients use, as `/v1/models` lists it (`qwen3.8-flash-next`, `glm-5.3-flash`).
+- `family` (`qwen3.8-flash-next`, `glm-5.3-flash`): requests may name the family instead of an id
+  ([API](api.md#models)). `/v1/models` lists the `id`.
 - `quant`: its short name in the manager: the `quant` setting, bench run specs and run.sh's `QUANT`. Its setup step
   is `m` and the quant without dots or dashes (`m405`, `mglm305` for `glm-3.05`). Quants are unique across models.
 - `source`: the Hugging Face repository, branch and pinned revision. Downloads check every file against the Hub's
@@ -36,7 +37,7 @@ offered once it has passed curation: a compatibility check and a regression chec
 |---|---|
 | Setup | one model step per model, with its label, sizes, folder, store, repository, revision and branch (`setup/50_model.sh` takes them as options; `setup/check.sh` is told where each model lives) |
 | Settings > Model version, Setup | the models on offer, with their curation state |
-| The API | the configured model's family, as `/v1/models` lists it (the manager's and the model server's) |
+| The API | `/v1/models` lists the installed, offered models by `id` (the configured one first); a request's `model` picks one ([API](api.md#models)) |
 | Starting the engine | `MODEL_DIR` and `STORE`; run.sh by hand reads them for any quant but Qwen's two |
 | Sizing | expert bytes, the VRAM that isn't experts, the expert layout and top-k, KV bytes per token, prefill activations per token, the largest context |
 

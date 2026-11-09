@@ -542,6 +542,7 @@ const FIELDS = [
     ["upgrade_when_idle", "Go back to full when resources free up (while idle)", "check"],
     ["preload_when_free", "Reload after a pressure pause without waiting for a request", "check"],
     ["preload_on_launch", "Load the model when the service starts", "check"],
+    ["switch_on_request", "Switch to the model a request names", "check", null, "Any installed model /v1/models lists. Off: the loaded model answers whatever a request names."],
     ["wake_override_min", "After you call it under pressure, stay up for (min)", "number"],
     ["idle_unload_min", "Unload after idle for (min, 0 = never)", "number"],
     ["busy_wait_s", "Hold a request while GPU is busy for up to (s)", "number"],

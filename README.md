@@ -43,7 +43,9 @@ request loads the model, which takes about a minute.
 
 ### Connect a client
 
-Any OpenAI-compatible client works: base URL `http://127.0.0.1:30000/v1`, model `qwen3.8-flash-next`, any API key.
+Any OpenAI-compatible client works: base URL `http://127.0.0.1:30000/v1`, a model from `/v1/models`, any API key.
+Naming another installed model switches to it ([API](docs/api.md#models)); `qwen3.8-flash-next` means the Qwen
+quant that is loaded, or the largest one installed.
 
 ```bash
 curl http://127.0.0.1:30000/v1/responses -H "Content-Type: application/json" \

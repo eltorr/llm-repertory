@@ -137,8 +137,9 @@ class ModelStepTests(unittest.TestCase):
 class DashboardTests(unittest.TestCase):
     def service(self, **cfg):
         from repertory.service import Service
-        svc = types.SimpleNamespace(cfg=dict(config.DEFAULTS, **cfg))
-        svc.model = lambda: Service.model(svc)
+        svc = types.SimpleNamespace(cfg=dict(config.DEFAULTS, **cfg), setup=types.SimpleNamespace(hw=None))
+        for name in ("model", "client_models", "model_object"):
+            setattr(svc, name, getattr(Service, name).__get__(svc))
         return svc, Service
 
     def test_the_model_choices_and_the_served_name_come_from_the_catalog(self):
@@ -148,7 +149,7 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual([(c["quant"], c["label"], c["curation"]) for c in choices],
                          [("3.05", "3.05 bpw (fastest)", "untested"),
                           ("4.05", "4.05 bpw (higher fidelity)", "untested")])
-        self.assertEqual(Service.models_list(svc)["data"][0]["id"], "qwen3.8-flash-next")
+        self.assertEqual(Service.models_list(svc)["data"][0]["id"], "qwen3.8-flash-next-exl3-4.05")
         cat = with_curation(**{"3.05": "failed", "4.05": "curated"})
         with mock.patch.object(catalog, "load", lambda: cat):
             self.assertEqual([c["quant"] for c in Service.model_choices(svc)], ["4.05"])        # failed: not offered
@@ -176,7 +177,7 @@ class DashboardTests(unittest.TestCase):
             choices = {c["quant"]: c for c in Service.model_choices(svc)}
             self.assertEqual((choices["glm-3.05"]["label"], choices["glm-3.05"]["offered"]),
                              ("GLM-5.3-Flash 3.05 bpw", False))
-            self.assertEqual(Service.models_list(svc)["data"][0]["id"], "glm-5.3-flash")
+            self.assertEqual(Service.models_list(svc)["data"][0]["id"], "glm-5.3-flash-exl3-3.05")
         cat = with_curation(**{"glm-3.05": "curated"})
         with mock.patch.object(catalog, "load", lambda: cat):
             svc.cfg["quant"] = "3.05"
