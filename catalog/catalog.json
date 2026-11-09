@@ -1005,7 +1005,7 @@
       "cpu_execution": "experimental",
       "offer_untested": false,
       "curation": {
-        "status": "untested",
+        "status": "curated",
         "date": "2026-11-08",
         "machine": {
           "gpu": "NVIDIA GeForce RTX 5090",
@@ -1013,12 +1013,12 @@
           "ram_gb": 68.3,
           "platform": "windows-wsl"
         },
-        "engine_commit": "fac07b78f993d3a582e829607761a6dbf81d661e",
+        "engine_commit": "9801265d99fdb1292e1d4f569bde63f5370d88e7",
         "checks": {
           "compat": {
             "ok": true,
             "date": "2026-11-08",
-            "engine_commit": "fac07b78f993d3a582e829607761a6dbf81d661e",
+            "engine_commit": "9801265d99fdb1292e1d4f569bde63f5370d88e7",
             "machine": {
               "gpu": "NVIDIA GeForce RTX 5090",
               "vram_gb": 34.2,
@@ -1071,58 +1071,105 @@
             "summary": "compatible"
           },
           "regression": {
-            "ok": null,
+            "ok": true,
             "date": "2026-11-08",
             "items": [
               {
-                "name": "natural ends",
+                "name": "short",
                 "ok": true,
-                "detail": "every answer ended by itself"
+                "detail": "KL mean 0 (at most 0.002), max 0; top-1 agreement 88/88, none flipped; decode took the forward pass's likeliest token at 84/88 positions (off at most 10%), the others at most 0.39 nat below it (at most 1); the answer token's logprob moved 0 on average, at most 0; text identical"
               },
               {
-                "name": "tool call",
+                "name": "code",
                 "ok": true,
-                "detail": "get_weather({\"city\": \"Lisbon\"})"
+                "detail": "KL mean 0 (at most 0.002), max 0; top-1 agreement 330/330, none flipped; decode took the forward pass's likeliest token at 326/330 positions (off at most 10%), the others at most 0.22 nat below it (at most 1); the answer token's logprob moved 0 on average, at most 0; text identical"
+              },
+              {
+                "name": "tool",
+                "ok": true,
+                "detail": "KL mean 0 (at most 0.002), max 0; top-1 agreement 13/13, none flipped; decode took the forward pass's likeliest token at 13/13 positions (off at most 10%), the others at most 0 nat below it (at most 1); the answer token's logprob moved 0 on average, at most 0; text identical"
               },
               {
                 "name": "document",
                 "ok": true,
-                "detail": "Technician Ilsa Varga serviced the backup generator, and the code word is PERIWINKLE."
+                "detail": "names Ilsa Varga and PERIWINKLE; text identical"
               },
               {
-                "name": "thinking",
+                "name": "reasoning",
                 "ok": true,
-                "detail": "reasoned before answering"
-              },
-              {
-                "name": "tokens",
-                "ok": true,
-                "detail": "521 answer tokens with their logprobs"
+                "detail": "KL mean 0 (at most 0.002), max 0; top-1 agreement 90/90, none flipped; decode took the forward pass's likeliest token at 90/90 positions (off at most 10%), the others at most 0 nat below it (at most 1); the answer token's logprob moved 0 on average, at most 0; text identical"
               },
               {
                 "name": "decode",
                 "ok": true,
-                "detail": "each answer's decode took the forward pass's likeliest tokens, near ties aside"
+                "detail": "19.7 tok/s against 19.7 (+0.0%; at most 15% slower passes)"
+              },
+              {
+                "name": "prefill",
+                "ok": true,
+                "detail": "2,276.6 tok/s against 2,242.2 (+1.5%; at most 10% slower passes)"
               }
             ],
-            "engine_commit": "fac07b78f993d3a582e829607761a6dbf81d661e",
+            "engine_commit": "9801265d99fdb1292e1d4f569bde63f5370d88e7",
             "machine": {
               "gpu": "NVIDIA GeForce RTX 5090",
               "vram_gb": 34.19,
               "ram_gb": 68.3,
               "platform": "windows-wsl"
             },
-            "summary": "reference recorded in glm-5.3-flash-exl3-2.05.json: decode 20.07 tok/s, prefill 2262.2 tok/s; run the check again to compare against it",
             "numbers": {
-              "decode_tps": 20.07,
-              "prefill_tps": 2262.2,
-              "recorded": true,
+              "kl_mean_limit": 0.002,
+              "tie_gap_limit": 1.0,
+              "off_top_limit": 0.1,
+              "short_top1": 1.0,
+              "short_decode_off_share": 0.0455,
+              "short_flip_gap_max": 0.0,
+              "short_kl_mean": 0.0,
+              "short_kl_max": 0.0,
+              "short_logprob_delta_mean": 0.0,
+              "short_logprob_delta_max": 0.0,
+              "short_decode_gap_max": 0.39,
+              "code_top1": 1.0,
+              "code_decode_off_share": 0.0121,
+              "code_flip_gap_max": 0.0,
+              "code_kl_mean": 0.0,
+              "code_kl_max": 0.0,
+              "code_logprob_delta_mean": 0.0,
+              "code_logprob_delta_max": 0.0,
+              "code_decode_gap_max": 0.218,
+              "tool_top1": 1.0,
+              "tool_decode_off_share": 0.0,
+              "tool_flip_gap_max": 0.0,
+              "tool_kl_mean": 0.0,
+              "tool_kl_max": 0.0,
+              "tool_logprob_delta_mean": 0.0,
+              "tool_logprob_delta_max": 0.0,
+              "tool_decode_gap_max": 0.0,
+              "reasoning_top1": 1.0,
+              "reasoning_decode_off_share": 0.0,
+              "reasoning_flip_gap_max": 0.0,
+              "reasoning_kl_mean": 0.0,
+              "reasoning_kl_max": 0.0,
+              "reasoning_logprob_delta_mean": 0.0,
+              "reasoning_logprob_delta_max": 0.0,
+              "reasoning_decode_gap_max": 0.0,
+              "identical": "5/5",
+              "decode_tolerance_pct": 15,
+              "prefill_tolerance_pct": 10,
+              "decode_tps": 19.7,
+              "decode_ref_tps": 19.7,
+              "decode_change_pct": 0.0,
+              "prefill_tps": 2276.6,
+              "prefill_ref_tps": 2242.2,
+              "prefill_change_pct": 1.5,
               "context": 262144,
-              "ram_gib": 39,
-              "vram_gb": 28.94,
-              "vram_experts": 2784,
-              "startup_s": 90.5
-            }
+              "ram_gib": 38,
+              "vram_gb": 28.72,
+              "vram_experts": 2752,
+              "startup_s": 67.2,
+              "vram_experts_ref": 2752
+            },
+            "summary": "answers within the tolerance (5/5 identical as text), speed within the tolerance"
           }
         }
       }

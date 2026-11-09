@@ -44,12 +44,11 @@ passed curation: a compatibility check and a regression check on the GPU (`reper
   (Qwen 4.05: about 6,200). Each GLM token moves about three times the expert bytes of a Qwen one, and a third of
   them aren't in memory. sybil-solutions measured 19.5 tok/s on an RTX 3090 with a 55 GiB RAM cap, 8-channel RAM and
   four NVMe drives in RAID0.
-- **GLM-5.3-Flash 2.05 bpw** (`glm-2.05`) is in the catalog too, not offered until it is curated. Its files, pin,
-  architecture and fit pass, and its reference is recorded: 20.1 tok/s on curation's requests and the document read
-  at 2,262 tok/s, 2.3 and 1.8 times 3.05's. The comparison run is still to do: loading it with the 40 GiB RAM cache
-  the manager gives it took free RAM down to 1.4 GB on this PC (9.6 GB once settled). On the
-  [head-to-head](../research/head-to-head/REPORT.md) it passed 5 of 7, as 3.05 did. It takes about 164 GB on disk
-  (85.2 GB download, 78.4 GB store).
+- **GLM-5.3-Flash 2.05 bpw** (`glm-2.05`) is curated on the RTX 5090: 19.7 tok/s on curation's requests and the
+  document read at 2,277 tok/s with a 38 GiB RAM cache, 2.2 and 1.9 times 3.05's; the comparison run's answers
+  matched the reference token for token. Switching to it leaves this PC at least 5.8 GB of free RAM (it used to
+  leave 1.4 GB, which held up its curation). On the [head-to-head](../research/head-to-head/REPORT.md) it passed 5
+  of 7, as 3.05 did. It takes about 164 GB on disk (85.2 GB download, 78.4 GB store).
 - **Disk:** GLM 3.05 takes about 243 GB (download and store). On Windows, check the free space of the drive that holds
   WSL's disk image, not `df` inside WSL: WSL went down here when that drive filled during the store pack.
 

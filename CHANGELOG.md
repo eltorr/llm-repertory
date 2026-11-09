@@ -14,6 +14,10 @@ What changed in Repertory, newest first.
   spare (`bench.REFERENCE_RAM_MARGIN_GIB`), so the check that compares with it can start the same cache on a day
   with a little less free. `--record` keeps the old reference's context and sizes the RAM cache afresh; before, it
   reused the old cache size, so a reference the PC could no longer spare couldn't be recorded again.
+- **GLM-5.3-Flash 2.05 is curated** on the RTX 5090 (64 GB RAM, WSL2), so it is offered in the Setup tab: its
+  reference recorded again with a 38 GiB RAM cache (19.7 tok/s, the 58K document at 2,242 tok/s), then the check
+  passed: every answer identical token for token, decode +0.0%, prefill +1.5%. Free RAM stayed at 7.1 GB or more
+  through both runs.
 
 ## 2026-11-08: Starting a model leaves the PC its RAM
 

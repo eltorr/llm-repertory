@@ -77,9 +77,10 @@ What went wrong:
 
 - **Starting GLM 2.05 squeezed this PC's RAM; it no longer does.** With the 40 GiB RAM cache the manager gives it,
   loading took free RAM down to 1.4 GB, from 54 GB with nothing loaded: the page cache from loading sat on top of
-  the cache. Curation's benchmark run stepped aside for it twice and its third try was cancelled, so GLM 2.05's
-  regression check is still to do. Since the fixes in the [CHANGELOG](../../CHANGELOG.md) ("Starting a model leaves
-  the PC its RAM"), switching to it leaves at least 5.8 GB free, and 8.8 GB once it has settled.
+  the cache, and curation's benchmark run had to step aside for it. Since the fixes in the
+  [CHANGELOG](../../CHANGELOG.md) ("Starting a model leaves the PC its RAM"), switching to it leaves at least 5.8 GB
+  free, and 8.8 GB once it has settled. Its curation then passed, with at least 7.1 GB free throughout: answers
+  identical to the reference token for token, 19.7 tok/s and 2,277 tok/s with a 38 GiB RAM cache.
 
 One run per task is a small sample: a second run could flip any of these. To settle it, repeat the coding tasks
 (about 12 minutes a round on GLM 2.05, 45 on Qwen 4.05 at xhigh), and try Qwen at `medium`, which may keep its

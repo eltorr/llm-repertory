@@ -35,6 +35,7 @@ bigger one. Real smaller cards also have less memory bandwidth, so expect somewh
 | 32 GB card | Qwen3.8-Flash-Next | 4.05 bpw | 256K | 35 GiB | mtp=2 | 63.8 tok/s | 4,804 tok/s (99K) | 0.50 s | standard | 2026-11-07 19:32 |
 | 32 GB card | Qwen3.8-Flash-Next | 4.05 bpw | 256K | 35 GiB | prefetch | 57.5 tok/s | 5,495 tok/s (99K) | 0.36 s | standard | 2026-11-07 19:20 |
 | 32 GB card | GLM-5.3-Flash | 2.05 bpw | 256K | 39 GiB | - | 20.1 tok/s | 2,262 tok/s (58K) | 0.84 s | reference | 2026-11-08 03:04 |
+| 32 GB card | GLM-5.3-Flash | 2.05 bpw | 256K | 38 GiB | - | 19.7 tok/s | 2,277 tok/s (58K) | 0.94 s | reference | 2026-11-08 20:30 |
 | 32 GB card | GLM-5.3-Flash | 3.05 bpw | 256K | 38 GiB | - | 8.8 tok/s | 1,228 tok/s (58K) | 2.66 s | reference | 2026-11-08 00:41 |
 | 32 GB card | Qwen3.8-Flash-Next | 3.05 bpw | 256K | 22 GiB | - | 49.0 tok/s | 6,219 tok/s (73K) | 0.15 s | reference | 2026-11-07 23:20 |
 | 32 GB card | Qwen3.8-Flash-Next | 4.05 bpw | 256K | 35 GiB | - | 42.9 tok/s | 6,209 tok/s (73K) | 0.24 s | reference | 2026-11-07 23:17 |
