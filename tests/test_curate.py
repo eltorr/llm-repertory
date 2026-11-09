@@ -606,7 +606,9 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(ref["engine_commit"], "fedcba9876543210fedcba9876543210fedcba98")
         self.assertGreater(ref["speed"]["decode_tps"], 0)
         self.assertGreater(ref["speed"]["prefill_tps"], 0)
-        self.assertGreater(ref["run"]["ram_gib"], 0)
+        # 50 GB free, less the 9 GB kept free and the server's 9 GB: 29 GiB to spare, less the margin the check that
+        # compares with it needs to start the same cache on a day the PC has a little less free
+        self.assertEqual(ref["run"]["ram_gib"], 29 - bench.REFERENCE_RAM_MARGIN_GIB)
         # the token data: every case's but the document's, which keeps the facts its answer must name
         doc = ref["cases"][3]
         self.assertEqual((doc["expect"], "tokens" in doc), (["Ilsa Varga", "PERIWINKLE"], False))
@@ -652,6 +654,9 @@ class RegressionTests(unittest.TestCase):
         for c in ref["cases"]:
             if "tokens" in c:
                 self.assertIn(c["tokens"]["prompt"] + c["tokens"]["answer"], forced)
+        # recording again keeps the context and sizes the RAM cache afresh: what the PC can spare changes
+        self.regression(record=True)
+        self.assertEqual(self.specs[-1], ["4.05:card:262144"])
 
     def test_new_text_passes_when_its_tokens_replay_and_says_where_it_parted(self):
         self.regression(record=True)
@@ -737,12 +742,18 @@ class RegressionTests(unittest.TestCase):
 
     def test_a_run_that_fails_or_is_cut_short(self):
         self.regression(record=True)
-        r = curate.regression(self.model, lambda specs, wl: [{"error": "does not fit: 6 GB"}], folder=self.refs)
-        self.assertFalse(r["ok"])
+        r = curate.regression(self.model, lambda specs, wl: [{"error": "the server exited"}], folder=self.refs)
+        self.assertEqual((r["ok"], r.get("not_run")), (False, None))
+        # a run that didn't happen: not run, and the check keeps its earlier result (CurationRunTests)
+        msg = "not enough free RAM for a 39 GiB RAM cache: the PC can spare 38 GiB now"
+        r = curate.regression(self.model, lambda specs, wl: [{"error": msg, "skipped": True, "finished": True}],
+                              folder=self.refs)
+        self.assertEqual((r["ok"], r["not_run"], r["summary"]), (None, True, f"not run: {msg}"))
         r = curate.regression(self.model, lambda specs, wl: [{"error": "interrupted: GPU busy", "interrupted": True}],
                               folder=self.refs)
-        self.assertIsNone(r["ok"])
-        self.assertIsNone(curate.regression(self.model, lambda specs, wl: None, folder=self.refs)["ok"])
+        self.assertEqual((r["ok"], r["not_run"]), (None, True))
+        r = curate.regression(self.model, lambda specs, wl: None, folder=self.refs)
+        self.assertEqual((r["ok"], r["not_run"]), (None, True))
 
     def test_requests_are_greedy_never_capped_and_think_only_once(self):
         seen = []
@@ -987,6 +998,18 @@ class ResultTests(unittest.TestCase):
         rec, results = curate.run(M405, checks="all", runner=lambda *a: self.fail("the GPU was taken"), **kw)
         self.assertEqual((rec["status"], results["regression"]), ("failed", None))
         self.assertFalse(catalog.offered(catalog.load(path).model(M405)))
+        # a regression run that didn't happen leaves the entry as it was; with compatibility, only that is new
+        kw["machine"] = rtx5090()
+        before = catalog.load(path).model(M405)["curation"]
+        skipped = {"ok": None, "not_run": True, "date": "2026-11-08", "summary": "not run: not enough free RAM",
+                   "items": [{"name": "run", "ok": None, "detail": "not enough free RAM"}]}
+        with mock.patch.object(curate, "regression", lambda *a, **k: copy.deepcopy(skipped)):
+            rec, results = curate.run(M405, checks="regression", runner=None, **kw)
+            self.assertEqual((rec, catalog.load(path).model(M405)["curation"]), (before, before))
+            self.assertIn("(not written)", curate.report(catalog.load(path).model(M405), rec, results, True))
+            rec, _ = curate.run(M405, checks="all", runner=None, **kw)
+        self.assertEqual(rec["checks"]["regression"], before["checks"]["regression"])
+        self.assertTrue(rec["checks"]["compat"]["ok"])
         # and nothing else in the catalog changed
         got = json.loads(path.read_text(encoding="utf-8"))
         want = copy.deepcopy(DATA)                                          # the entry's record replaced, and only it

@@ -23,8 +23,12 @@ regression  Takes the GPU, through the benchmark (repertory/bench.py, workload "
             and prefill may be at most DECODE_TOLERANCE and PREFILL_TOLERANCE slower than the reference's, which is
             only compared on the machine it was measured on (elsewhere the check can't pass).
             --record writes a new reference from the run (catalog/reference/MODEL.json) when there is none, or to
-            accept a change; the next run compares against it. A reference from before the token comparison has no
-            token data: until it is recorded again, the check is undecided.
+            accept a change; the next run compares against it, with the same context and RAM cache. The recording
+            sizes the RAM cache afresh, a little under what the PC can spare (bench.REFERENCE_RAM_MARGIN_GIB), so
+            the next run can start it too. A reference from before the token comparison has no token data: until it
+            is recorded again, the check is undecided. A run that didn't happen (the benchmark skipped it, for
+            instance because the PC couldn't spare the reference's RAM cache, or it was cut short) is not run: the
+            check keeps its earlier result.
 
 The result goes into the entry's `curation` in catalog/catalog.json: curated when both checks passed, failed when one
 failed, untested otherwise (one not run yet, or a reference just recorded). With it: the date, the machine (GPU and
@@ -492,10 +496,11 @@ def same_machine(a, b):
             and abs((a.get("vram_gb") or 0) - (b.get("vram_gb") or 0)) < 1.0)
 
 
-def reference_spec(model, ref):
-    """The bench run: the whole card at the reference's context (else the model's largest), with its RAM cache."""
+def reference_spec(model, ref, record=False):
+    """The bench run: the whole card at the reference's context (else the model's largest), with its RAM cache; a
+    recording sizes the RAM cache again (what the PC can spare changes)."""
     context = (ref or {}).get("run", {}).get("context") or min(model["facts"]["max_context"], MAXIMUM["context"])
-    ram = (ref or {}).get("run", {}).get("ram_gib")
+    ram = None if record else (ref or {}).get("run", {}).get("ram_gib")
     return f"{model['quant']}:card:{context}" + (f":ram={ram}" if ram else "")
 
 
@@ -688,15 +693,20 @@ def regression(model, runner, record=False, folder=None):
                            "then run this again to compare",
                    items=[item("reference", None, f"{ref.get('date')}'s reference has no token data to replay")])
         return out
-    # a new reference keeps the configuration of the one it replaces, so speeds stay comparable over time
-    records = runner([reference_spec(model, existing)], "reference")
+    # a new reference keeps the context of the one it replaces, so speeds stay comparable over time
+    records = runner([reference_spec(model, existing, record)], "reference")
     rec = (records or [None])[0]
     if not rec:
-        out.update(summary="the benchmark didn't run", items=[item("run", None, "refused or no result")])
+        out.update(not_run=True, summary="not run: the benchmark didn't run",
+                   items=[item("run", None, "refused or no result")])
+        return out
+    if rec.get("skipped"):
+        out.update(not_run=True, summary=f"not run: {rec['error']}", items=[item("run", None, rec["error"])])
         return out
     out.update(engine_commit=rec.get("engine_commit"), machine=run_machine(rec))
     if rec.get("interrupted") or rec.get("error") == "cancelled":
-        out.update(summary=f"cut short ({rec.get('error')}): run it again", items=[item("run", None, rec.get("error"))])
+        out.update(not_run=True, summary=f"not run: cut short ({rec.get('error')}), run it again",
+                   items=[item("run", None, rec.get("error"))])
         return out
     if rec.get("error"):
         out.update(ok=False, summary=f"the run failed: {rec['error']}", items=[item("run", False, rec["error"])])
@@ -782,7 +792,9 @@ def run(model_id, cfg, checks="all", record=False, write=True, machine=None, fil
             results["regression"] = None                   # not run: the GPU isn't taken for an entry that can't pass
         else:
             results["regression"] = regression(model, runner, record, reference_dir)
-    ran = {k: v for k, v in results.items() if v is not None}
+    ran = {k: v for k, v in results.items() if v is not None and not v.get("not_run")}   # the rest keep their last
+    if not ran and model.get("curation"):
+        return model["curation"], results              # nothing ran: the entry stays as it was
     rec = curation(model, ran)
     if write:
         catalog.save_curation(model["id"], rec, path)
@@ -802,6 +814,8 @@ def report(model, rec, results, written):
             continue
         lines.append(f"{title}: {r.get('summary', '')}")
         lines += [f"  {mark[i['ok']]} {i['name']:<13} {i.get('detail', '')}" for i in r["items"]]
+    if written and all(r and r.get("not_run") for r in results.values()):
+        written = False                                 # run() left the entry as it was
     lines.append(f"status: {rec['status']}" + (" (written to catalog/catalog.json)" if written else " (not written)"))
     return "\n".join(lines)
 

@@ -130,12 +130,16 @@ They are compared with the model's reference, `catalog/reference/<model-id>.json
 - Speeds are compared only on the machine the reference was recorded on (the same GPU, card and platform).
   Elsewhere the answers are still compared, and the check stays undecided.
 
-A run uses the reference's context and RAM cache, so it starts the same configuration.
+A run uses the reference's context and RAM cache, so it starts the same configuration. If the PC can't spare that
+RAM cache when the run starts, the benchmark skips it: the check is not run and keeps its earlier result, as it does
+when the run is cut short.
 
 **Recording a reference** (`--record`): when there is none, or to accept a change, such as new answers after an
 engine update you have looked at. The answers must be fit to be a reference: each ends by itself, the tool call is
 the weather lookup for Lisbon, the document's facts are found, the last one reasons, and the others came with their
-token data. The reference keeps the answers, the speeds, the run's configuration, the engine commit and the
+token data. A recording keeps the context of the reference it replaces and sizes the RAM cache afresh, 2 GiB under
+what the PC can spare then, so the check can start the same cache on a day with a little less free RAM. The
+reference keeps the answers, the speeds, the run's configuration, the engine commit and the
 machine; for each answer but the document's, its prompt and answer as token ids (from the engine's `/prepare`, which
 builds the prompt as the chat routes do, and a greedy `/generate` to the answer's natural end) with each position's
 logprobs, the answer token's and the 20 likeliest, to three decimals, a line a position; for the document, the facts

@@ -2,6 +2,19 @@
 
 What changed in Repertory, newest first.
 
+## 2026-11-08: Curation: a run that didn't happen isn't a failure
+
+- **A skipped or cut-short regression run is not run, not failed.** GLM-5.3-Flash 2.05's reference was recorded
+  with a 39 GiB RAM cache, the most the PC could spare then. The next check found 38 GiB to spare (about 1 GB more
+  in use on Windows), the benchmark rightly skipped the run, and curation marked the model `failed` and replaced the
+  recorded result. Now a run the benchmark skips (the RAM cache can't be spared, the model isn't downloaded, it
+  doesn't fit beside what the desktop holds), cuts short or doesn't start leaves the check as it was, and the report
+  says why it didn't run. Benchmark records of skipped runs carry `skipped`.
+- **A reference leaves room for the next check.** A reference run takes 2 GiB less RAM cache than the PC can
+  spare (`bench.REFERENCE_RAM_MARGIN_GIB`), so the check that compares with it can start the same cache on a day
+  with a little less free. `--record` keeps the old reference's context and sizes the RAM cache afresh; before, it
+  reused the old cache size, so a reference the PC could no longer spare couldn't be recorded again.
+
 ## 2026-11-08: Starting a model leaves the PC its RAM
 
 - **Loading no longer piles page cache on top of the RAM cache.** Under WSL, files a start reads stay in the VM's

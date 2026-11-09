@@ -478,6 +478,7 @@ class BenchTests(unittest.TestCase):
         # 50 GB free, less the 9 GB kept free and the server's own 9 GB: 29 GiB to spare
         r = self.run_bench(["3.05:card:65536:ram=30"]).records[0]
         self.assertEqual(r["error"], "not enough free RAM for a 30 GiB RAM cache: the PC can spare 29 GiB now")
+        self.assertTrue(r["skipped"])                                   # not run: curation keeps the earlier result
         self.assertEqual(self.svc.host.envs, [])
 
     def test_a_set_ram_cache_waits_for_wsl_to_hand_the_last_servers_ram_back(self):

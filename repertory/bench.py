@@ -39,7 +39,9 @@ The PC comes first. When a game or another app needs the GPU (a watched app, ano
 crowding the card) or free RAM falls below the manager's ram_pause_gb, the run steps aside: its server stops, the
 benchmark waits until the PC has been free for `recover_after_s`, then does that run again from the start. Finished
 runs are kept. As the manager does, a run drops the VM's page cache once its server is up and after it stops, and a
-set RAM cache (":ram=GIB") starts only if the PC can spare it (after a stop, once WSL has handed the RAM back).
+set RAM cache (":ram=GIB") starts only if the PC can spare it (after a stop, once WSL has handed the RAM back);
+otherwise the run is skipped (recorded with skipped and the reason). A reference run sized here (no ":ram=") takes
+REFERENCE_RAM_MARGIN_GIB less than the PC can spare: curation pins that cache for the runs that compare with it.
 A benchmark cut short (cancelled, the manager restarted, the PC rebooted) continues with `repertory bench --resume`
 or the tab's Resume button: the runs left go into the same folder.
 
@@ -113,6 +115,8 @@ YIELD_AFTER_S = 10                  # how long the PC must need them before the 
 MAX_YIELDS = 3                      # a run interrupted more often is recorded as interrupted (resume redoes it)
 REPLACED = "another model server replaced this run's on its port: what was measured may be that server's"
 RAM_FLOOR_GB = 1.0                  # free RAM below this (or the manager's ram_pause_gb, if higher): the PC is short
+REFERENCE_RAM_MARGIN_GIB = 2        # a reference run takes this much less RAM cache than the PC can spare, so the check
+                                    # that compares with it can start the same cache on a day with a little less free
 PLAN = "_plan.json"                 # the benchmark's runs and workload, for resuming (not a result)
 
 # Curation's regression requests: the cases of research/engine-parity/engine_compare.py, byte for byte (so its results
@@ -872,8 +876,11 @@ class Bench:
         else:
             caps = [c for c in (cfg["max_ram_cache_gib"],
                                 svc.learned.get(svc.learned_key(r["quant"], r["context"]), {}).get("ram_cap")) if c]
-            ram_gib = sizing.ram_cache_gib(target, svc.ram_for_start(m), cfg, svc.ram_overhead(r["quant"]),
-                                           min(caps) if caps else None)
+            avail, over = svc.ram_for_start(m), svc.ram_overhead(r["quant"])
+            ram_gib = sizing.ram_cache_gib(target, avail, cfg, over, min(caps) if caps else None)
+            if self.workload == "reference":
+                ram_gib = min(ram_gib, max(int(cfg["lean_ram_gb"]),
+                                           sizing.ram_spare_gib(avail, cfg, over) - REFERENCE_RAM_MARGIN_GIB))
         paths = catalog.load().model(r["quant"])["paths"]
         env = {"QUANT": r["quant"], "CONTEXT": str(r["context"]), "PORT": str(cfg["backend_port"]),
                "MODEL_DIR": "./" + paths["model_dir"], "STORE": "./" + paths["store"],
@@ -957,7 +964,7 @@ class Bench:
                             f"{max(0, spare)} GiB now")
         if rec.get("error"):
             self.emit(f"  skipped: {rec['error']}")
-            rec["finished"] = True
+            rec["finished"] = rec["skipped"] = True
             save()
             return rec
         env, rec["ram_gib"] = self.engine_env(r, plan, m, budget)
